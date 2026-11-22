@@ -58,6 +58,8 @@ const formatKes = (value, rate = 128) => `KSh ${(Number(value) * Number(rate)).t
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 let price = 3842.61;
 let chartPoints = [];
+let livePrice = 3842.61;
+let liveChartPoints = [];
 let chartTimer;
 let toastTimer;
 let botSignal = null;
@@ -248,7 +250,7 @@ function renderAuth() {
     ${auth.message ? `<div class="auth-alert ${auth.messageType}">${escapeHtml(auth.message)}</div>` : ""}
     ${auth.profileError ? `<div class="auth-alert error">${escapeHtml(auth.profileError)}</div>` : ""}
     ${form}
-    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back to sign in</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button><button class="auth-setup-button" type="button" data-action="admin-create">Create one-time admin account</button>` : ""}</div>` : adminCreate ? `<div class="auth-switch">Administrator setup · <button class="auth-link" type="button" data-action="leave-admin">Back to sign in</button></div>` : ""}
+    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back to sign in</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>${auth.adminConfigured === false && !auth.user ? `<button class="auth-setup-button" type="button" data-action="admin-create">Create one-time admin account</button>` : ""}` : ""}</div>` : adminCreate ? `<div class="auth-switch">Administrator setup · <button class="auth-link" type="button" data-action="leave-admin">Back to sign in</button></div>` : ""}
     <button class="auth-link centered funds-terms-link" data-action="show-funds-terms">Wallet funds terms</button>
     <div class="auth-security"><span>⌑</span> Passwords are handled by Supabase Auth and are never stored in this site’s source code.</div>
   </section></main>`;
@@ -319,15 +321,45 @@ async function refreshTerminalSnapshot(renderOnChange = false) {
   const changeEl = document.querySelector("#price-change");
   const clock = document.querySelector("#chart-clock");
   const canvas = document.querySelector("#price-chart");
-  if (priceEl) priceEl.textContent = price.toFixed(2);
-  if (changeEl) {
-    const change = data.previousPrice ? ((price - Number(data.previousPrice)) / Number(data.previousPrice)) * 100 : 0;
-    changeEl.textContent = `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`;
-    changeEl.className = change >= 0 ? "positive" : "negative";
+  if (state.mode === "demo") {
+    if (priceEl) priceEl.textContent = price.toFixed(2);
+    if (changeEl) {
+      const previousPrice = Number(data.previousPrice);
+      const change = previousPrice ? ((price - previousPrice) / previousPrice) * 100 : 0;
+      changeEl.textContent = `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`;
+      changeEl.className = change >= 0 ? "positive" : "negative";
+    }
+    if (clock) clock.textContent = new Date().toLocaleTimeString();
   }
-  if (clock) clock.textContent = new Date().toLocaleTimeString();
   if (canvas) drawChart(canvas);
   if (renderOnChange && (settingsChanged || tradesChanged)) render();
+}
+
+async function refreshLiveMarketSnapshot() {
+  const { data, error } = await supabase.rpc("get_live_market_snapshot");
+  if (error) throw error;
+
+  livePrice = Number(data.price);
+  liveChartPoints = (Array.isArray(data.ticks) ? data.ticks : [])
+    .map((tick, index) => ({ x: index, y: Number(tick.price) }));
+
+  if (state.mode === "live") {
+    const priceEl = document.querySelector("#current-price");
+    const changeEl = document.querySelector("#price-change");
+    const clock = document.querySelector("#chart-clock");
+    const canvas = document.querySelector("#price-chart");
+    const previousPrice = liveChartPoints.length > 1
+      ? liveChartPoints[liveChartPoints.length - 2].y
+      : livePrice;
+    const change = previousPrice ? ((livePrice - previousPrice) / previousPrice) * 100 : 0;
+    if (priceEl) priceEl.textContent = livePrice.toFixed(2);
+    if (changeEl) {
+      changeEl.textContent = `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`;
+      changeEl.className = change >= 0 ? "positive" : "negative";
+    }
+    if (clock) clock.textContent = new Date().toLocaleTimeString();
+    if (canvas) drawChart(canvas);
+  }
 }
 
 async function refreshWalletSnapshot(renderOnChange = false) {
@@ -418,6 +450,9 @@ async function beginAuth() {
   }
   try {
     await checkAdminConfigured();
+    if (auth.screen === "admin-create" && auth.adminConfigured === true) {
+      auth.screen = "admin-login";
+    }
     const { data, error } = await supabase.auth.getSession();
     if (error) throw error;
     auth.user = data.session?.user || null;
@@ -451,6 +486,7 @@ async function beginAuth() {
         Object.assign(state, initialState);
         state.trades = [];
         chartPoints = [];
+        liveChartPoints = [];
         botSignal = null;
         auth.profile = null;
         auth.profileError = "";
@@ -488,7 +524,7 @@ function bindAuthEvents() {
       render();
       return;
     }
-    auth.screen = auth.adminConfigured !== true ? "admin-create" : "admin-login";
+    auth.screen = auth.adminConfigured === false ? "admin-create" : "admin-login";
     render();
   }));
   app.querySelectorAll('[data-action="leave-admin"]').forEach((button) => button.addEventListener("click", () => {
@@ -750,9 +786,15 @@ function tradingView() {
   const active = state.mode === "demo" ? state.demoBalance : state.liveBalance;
   const activeTrades = state.mode === "live" ? walletTrades : state.trades;
   const isLive = state.mode === "live";
+  const activePrice = isLive ? livePrice : price;
+  const activeChartPoints = isLive ? liveChartPoints : chartPoints;
+  const previousPrice = activeChartPoints.length > 1
+    ? activeChartPoints[activeChartPoints.length - 2].y
+    : activePrice;
+  const priceChange = previousPrice ? ((activePrice - previousPrice) / previousPrice) * 100 : 0;
   return `
     <section class="page-heading">
-      <div><div class="eyebrow"><span class="status-dot"></span> SHARED MARKET · MANAGED BY PIPMASTER</div><h1>Trading terminal</h1><p>${state.mode === "live" ? "Wallet-funded positions use the internal PIPMASTER market, not a connected broker or exchange." : "Explore the shared PIPMASTER market using demo funds."}</p></div>
+      <div><div class="eyebrow"><span class="status-dot"></span> ${isLive ? "LIVE MARKET · ADMIN MANAGED" : "DEMO MARKET · SEPARATE STREAM"}</div><h1>Trading terminal</h1><p>${isLive ? "Wallet-funded positions use the separate server-generated Live market managed by PIPMASTER." : "Explore a separate demo market stream using demo funds."}</p></div>
       <div class="mode-switch" role="group" aria-label="Account mode">
         <button class="${state.mode === "demo" ? "selected" : ""}" data-mode="demo">Demo</button>
         <button class="${state.mode === "live" ? "selected" : ""}" data-mode="live">Live</button>
@@ -764,17 +806,17 @@ function tradingView() {
       <button class="balance-card add-funds" data-view="wallet"><span class="plus">+</span><span><strong>Open wallet</strong><small>Deposit or withdraw funds</small></span><span class="arrow">↗</span></button>
     </section>
     <div class="terminal-grid">
-      <section class="panel chart-panel">
+      <section class="panel chart-panel ${isLive ? "live-chart" : "demo-chart"}">
         <div class="panel-heading chart-heading">
-          <div class="asset-title"><div class="asset-icon">P</div><div><strong>PIPMASTER Market</strong><small>Shared · 1 tick</small></div><span class="live-pill"><i></i> MANAGED BY PIPMASTER</span></div>
-          <div class="price-summary"><strong id="current-price">${price.toFixed(2)}</strong><span class="positive" id="price-change">+0.38%</span></div>
+          <div class="asset-title"><div class="asset-icon">P</div><div><strong>${isLive ? "PIPMASTER Live Market" : "PIPMASTER Demo Market"}</strong><small>${isLive ? "Live wallet · independent stream" : "Demo funds · independent stream"}</small></div><span class="live-pill"><i></i> ${isLive ? "ADMIN MANAGED" : "DEMO MARKET"}</span></div>
+          <div class="price-summary"><strong id="current-price">${activePrice.toFixed(2)}</strong><span class="${priceChange >= 0 ? "positive" : "negative"}" id="price-change">${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(2)}%</span></div>
         </div>
         <div class="chart-toolbar">
           <div class="chart-tabs"><button class="active">Chart</button><button data-view="history">${isLive ? "Live positions" : "Positions"} <span class="count">${activeTrades.filter((trade) => trade.status === "open").length}</span></button></div>
           <div class="timeframes">${["1m", "5m", "15m", "1h"].map((item, index) => `<button class="${index === 0 ? "active" : ""}" data-timeframe="${item}">${item}</button>`).join("")}<button class="chart-tool" title="Chart settings">⚑</button></div>
         </div>
-        <div class="chart-wrap"><canvas id="price-chart" aria-label="Shared PIPMASTER market chart"></canvas><div class="chart-overlay"><span>PIPMASTER INTERNAL MARKET</span><span id="chart-clock">00:00:00</span></div><div class="chart-watermark">PIP<span>MASTER</span></div></div>
-        <div class="chart-legend"><span><i class="legend-line"></i> Price</span><span><i class="legend-dot"></i> Shared market tick</span><span class="chart-source">Server-generated · Supabase</span></div>
+        <div class="chart-wrap"><canvas id="price-chart" aria-label="${isLive ? "Live" : "Demo"} PIPMASTER market chart"></canvas><div class="chart-overlay"><span>${isLive ? "LIVE WALLET MARKET · ADMIN MANAGED" : "SEPARATE DEMO MARKET"}</span><span id="chart-clock">00:00:00</span></div><div class="chart-watermark">PIP<span>MASTER</span></div></div>
+        <div class="chart-legend"><span><i class="legend-line"></i> ${isLive ? "Live market price" : "Demo market price"}</span><span><i class="legend-dot"></i> ${isLive ? "Live market tick" : "Demo market tick"}</span><span class="chart-source">Server-generated · Supabase</span></div>
       </section>
 
       <section class="panel trade-panel">${tradePanelView(active)}</section>
@@ -816,13 +858,13 @@ function tradePanelView(availableBalance) {
   }
 
   const stake = Math.min(state.stake, availableBalance);
-  return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the shared PIPMASTER market." : "Test your strategy with demo funds."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
+  return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the separate admin-managed Live market." : "Test your strategy with demo funds on the separate Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
     <div class="trade-field"><label>TRADE TYPE</label><div class="segmented" role="tablist"><button class="${state.tradeType === "digits" ? "selected" : ""}" data-trade-type="digits">Even / Odd</button><button class="${state.tradeType === "direction" ? "selected" : ""}" data-trade-type="direction">Over / Under</button></div></div>
     <div class="trade-field"><label>TRADE DURATION <span>Admin setting</span></label><div class="duration-select">${[10, 30, 60, 300].map((seconds) => `<button class="${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}</button>`).join("")}</div></div>
     <div class="trade-field"><label>STAKE <span>Available ${formatMoney(availableBalance)}</span></label><div class="stake-control"><button data-stake="-">−</button><div><span>$</span><input id="stake" inputmode="decimal" type="number" min="1" max="${availableBalance}" step="0.01" value="${stake}" aria-label="Trade stake"></div><button data-stake="+">+</button></div><div class="quick-stakes">${[1, 5, 10, 25].map((amount) => `<button data-quick-stake="${amount}">$${amount}</button>`).join("")}</div></div>
     <div class="payout-preview"><span>Potential return <small>incl. stake</small></span><strong id="potential-return">${formatMoney(stake * (1 + state.payout / 100))}</strong><span class="payout-rate">${state.payout}% payout</span></div>
     <div class="trade-actions"><button class="trade-button even" data-choice="${state.tradeType === "digits" ? "even" : "over"}"><span>${state.tradeType === "digits" ? "EVEN" : "OVER"}</span><small>${state.tradeType === "digits" ? "Last digit 0, 2, 4, 6, 8" : "Price finishes above entry"}</small><b>↗</b></button><button class="trade-button odd" data-choice="${state.tradeType === "digits" ? "odd" : "under"}"><span>${state.tradeType === "digits" ? "ODD" : "UNDER"}</span><small>${state.tradeType === "digits" ? "Last digit 1, 3, 5, 7, 9" : "Price finishes below entry"}</small><b>↘</b></button></div>
-    <div class="trade-footnote">${isLive ? `The ${formatMoney(stake)} stake is reserved from your wallet. Wins return the stake plus the displayed ${state.payout}% profit; losses forfeit the stake. Positions settle against the shared internal market.` : "Demo outcomes use the shared market price when the timer expires."}</div>`;
+    <div class="trade-footnote">${isLive ? `The ${formatMoney(stake)} stake is reserved from your wallet. Wins return the stake plus the displayed ${state.payout}% profit; losses forfeit the stake. Positions settle against the Live market shown above.` : "Demo outcomes use the separate demo market price when the timer expires."}</div>`;
 }
 
 function botCard(name, description, tier, icon, color) {
@@ -1090,6 +1132,7 @@ function bindEvents() {
     render();
     if (state.mode === "live") {
       refreshWalletSnapshot(true).catch((error) => showToast(`Wallet balance refresh failed: ${error.message}`));
+      refreshLiveMarketSnapshot().catch((error) => showToast(`Live market update failed: ${error.message}`));
     }
   }));
   app.querySelectorAll("[data-trade-type]").forEach((button) => button.addEventListener("click", () => {
@@ -1453,6 +1496,13 @@ function startChart() {
     } catch (error) {
       showToast(`Remote market update failed: ${error.message}`);
     }
+    if (state.mode === "live") {
+      try {
+        await refreshLiveMarketSnapshot();
+      } catch (error) {
+        showToast(`Live market update failed: ${error.message}`);
+      }
+    }
     const walletRefreshInterval = state.mode === "live"
       && walletTrades.some((trade) => trade.status === "open")
       ? 1000
@@ -1480,7 +1530,7 @@ function startChart() {
 }
 
 function drawChart(canvas) {
-  if (!canvas || chartPoints.length === 0) return;
+  if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   const dpr = window.devicePixelRatio || 1;
@@ -1491,6 +1541,9 @@ function drawChart(canvas) {
   const width = rect.width;
   const height = rect.height;
   ctx.clearRect(0, 0, width, height);
+  const isLive = state.mode === "live";
+  const points = isLive ? liveChartPoints : chartPoints;
+  if (points.length === 0) return;
   ctx.strokeStyle = "rgba(151,168,190,.09)";
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
@@ -1507,7 +1560,6 @@ function drawChart(canvas) {
     ctx.lineTo(x, height);
     ctx.stroke();
   }
-  const points = chartPoints;
   const ys = points.map((point) => point.y);
   const min = Math.min(...ys) - 0.07;
   const max = Math.max(...ys) + 0.07;
@@ -1517,8 +1569,8 @@ function drawChart(canvas) {
     y: height - 14 - ((point.y - min) / range) * (height - 28),
   }));
   const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, "rgba(55, 207, 165, .20)");
-  gradient.addColorStop(1, "rgba(55, 207, 165, 0)");
+  gradient.addColorStop(0, isLive ? "rgba(82, 161, 255, .20)" : "rgba(55, 207, 165, .20)");
+  gradient.addColorStop(1, isLive ? "rgba(82, 161, 255, 0)" : "rgba(55, 207, 165, 0)");
   ctx.beginPath();
   mapped.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
   ctx.lineTo(width, height);
@@ -1528,18 +1580,18 @@ function drawChart(canvas) {
   ctx.fill();
   ctx.beginPath();
   mapped.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
-  ctx.strokeStyle = "#40d8a6";
+  ctx.strokeStyle = isLive ? "#52a1ff" : "#40d8a6";
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.stroke();
   const current = mapped[mapped.length - 1];
   ctx.beginPath();
   ctx.arc(current.x, current.y, 4, 0, Math.PI * 2);
-  ctx.fillStyle = "#42d8a6";
+  ctx.fillStyle = isLive ? "#52a1ff" : "#42d8a6";
   ctx.fill();
   ctx.beginPath();
   ctx.arc(current.x, current.y, 8, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(66,216,166,.28)";
+  ctx.strokeStyle = isLive ? "rgba(82,161,255,.28)" : "rgba(66,216,166,.28)";
   ctx.stroke();
 }
 

@@ -172,6 +172,7 @@ button { cursor: pointer; }
 .funds-terms p { margin: 5px 0; color: #8996a7; font-size: 9px; line-height: 1.65; }
 .funds-terms .terms-note { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); color: #7d8a9b; }
 .terms-auth-card { width: min(100%, 760px); }
+.live-chart .chart-legend .legend-line, .live-chart .chart-legend .legend-dot { background: #52a1ff; }
 .terms-auth-card .funds-terms { max-height: 65vh; overflow-y: auto; margin: 20px 0; padding-right: 5px; }
 .funds-terms-link { display: block; margin: 12px auto 0; }
 
