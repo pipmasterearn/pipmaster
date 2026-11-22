@@ -18,15 +18,16 @@ const initialState = {
   trades: [],
 };
 
-const strategyBots = [
-  { name: "Pulse", type: "Momentum crossover", description: "Short momentum signals", tier: "Balanced", icon: "↗", color: "#9d8aff" },
-  { name: "Sentry", type: "Trend confirmation", description: "Multiple indicators aligned", tier: "Conservative", icon: "◉", color: "#54d5b6" },
-  { name: "Orbit", type: "Range movement", description: "Looks for price movement near recent range", tier: "Experimental", icon: "◎", color: "#f6b95d" },
-  { name: "LAMIA", type: "Quick Trade", description: "Three-tick momentum signal", tier: "Fast", icon: "↗", color: "#ff8c72" },
-  { name: "INSTA", type: "Instant Trade", description: "Last-tick direction signal", tier: "Instant", icon: "⚡", color: "#f5cf61" },
-  { name: "SKPOT", type: "Scalping", description: "Fast and slow average crossover", tier: "Short-term", icon: "⌁", color: "#61b8ed" },
-  { name: "VULJA", type: "Strategy Trade", description: "Trend and momentum confirmation", tier: "Confirmed", icon: "✦", color: "#df87da" },
+const defaultStrategyBots = [
+  { id: "pulse", name: "Pulse", strategyKey: "Pulse", type: "Momentum crossover", description: "Short momentum signals", tier: "Balanced", icon: "↗", color: "#9d8aff", price: 0, owned: true },
+  { id: "sentry", name: "Sentry", strategyKey: "Sentry", type: "Trend confirmation", description: "Multiple indicators aligned", tier: "Conservative", icon: "◉", color: "#54d5b6", price: 0, owned: true },
+  { id: "orbit", name: "Orbit", strategyKey: "Orbit", type: "Range movement", description: "Looks for price movement near recent range", tier: "Experimental", icon: "◎", color: "#f6b95d", price: 0, owned: true },
+  { id: "lamia", name: "LAMIA", strategyKey: "LAMIA", type: "Quick Trade", description: "Three-tick momentum signal", tier: "Fast", icon: "↗", color: "#ff8c72", price: 0, owned: true },
+  { id: "insta", name: "INSTA", strategyKey: "INSTA", type: "Instant Trade", description: "Last-tick direction signal", tier: "Instant", icon: "⚡", color: "#f5cf61", price: 0, owned: true },
+  { id: "skpot", name: "SKPOT", strategyKey: "SKPOT", type: "Scalping", description: "Fast and slow average crossover", tier: "Short-term", icon: "⌁", color: "#61b8ed", price: 0, owned: true },
+  { id: "vulja", name: "VULJA", strategyKey: "VULJA", type: "Strategy Trade", description: "Trend and momentum confirmation", tier: "Confirmed", icon: "✦", color: "#df87da", price: 0, owned: true },
 ];
+let strategyBots = defaultStrategyBots;
 
 const auth = {
   ready: false,
@@ -80,6 +81,24 @@ let walletAdminLoaded = false;
 let walletAdminLastAttemptAt = 0;
 let walletAdminError = "";
 let walletBusy = false;
+let strategyCatalogError = "";
+let adminOverviewData = null;
+let adminTransactionRows = [];
+let adminTransactionTotal = 0;
+let adminTransactionStatus = "all";
+let adminTransactionType = "all";
+let adminTransactionOffset = 0;
+let adminTransactionLoading = false;
+let adminUserRows = [];
+let adminUserTotal = 0;
+let adminUserSearch = "";
+let adminUserOffset = 0;
+let adminUserLoading = false;
+let notificationData = { unreadCount: 0, items: [] };
+let notificationPanelOpen = false;
+let notificationLastAttemptAt = 0;
+let notificationLoading = false;
+let notificationError = "";
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (char) => ({
@@ -123,7 +142,10 @@ function render() {
           <div class="breadcrumb"><span>Workspace</span><b>/</b><strong>${isAdmin ? "Admin controls" : isHistory ? "Activity" : "Trading terminal"}</strong></div>
           <div class="top-actions">
             <div class="account-chip"><span class="status-dot"></span> ${state.mode === "demo" ? "Demo account" : "Live wallet"}</div>
-            <button class="icon-button" title="Notifications" aria-label="Notifications">♧<i></i></button>
+            <div class="notification-control">
+              <button class="icon-button" type="button" title="Notifications" aria-label="Notifications" aria-expanded="${notificationPanelOpen}" data-action="notifications">♧<span class="notification-count ${notificationData.unreadCount ? "visible" : ""}">${notificationData.unreadCount > 99 ? "99+" : notificationData.unreadCount || ""}</span></button>
+              ${notificationPanelOpen ? notificationPanel() : ""}
+            </div>
             <button class="avatar small" data-view="profile" aria-label="Open profile">${avatarMarkup()}</button>
           </div>
         </header>
@@ -148,6 +170,7 @@ function render() {
     const canvas = document.querySelector("#price-chart");
     drawChart(canvas);
   }
+  syncNotificationBadge();
 }
 
 function avatarMarkup() {
@@ -201,7 +224,7 @@ function renderAuth() {
 
   let form = "";
   if (configMissing) {
-    form = `<div class="auth-alert error"><strong>Supabase setup is required</strong><p>Authentication and remote app data are intentionally fail-closed. Configure the GitHub Actions variables <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>, then apply all five Supabase migrations before sign-up can work.</p></div>`;
+    form = `<div class="auth-alert error"><strong>Supabase setup is required</strong><p>Authentication and remote app data are intentionally fail-closed. Configure the GitHub Actions variables <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>, then apply all Supabase migrations before sign-up can work.</p></div>`;
   } else if (denied) {
     form = `<div class="auth-alert error"><strong>This account is not an administrator.</strong><p>Admin access is granted from the protected database, not by choosing an email address on this screen.</p></div><div class="auth-actions"><button class="auth-primary" data-action="admin-retry">Try admin sign in</button><button class="auth-link" data-action="leave-admin">Return to trading</button></div>`;
   } else if (adminCreate) {
@@ -400,8 +423,10 @@ async function initializeWorkspace(user) {
   workspaceLoadPromise = (async () => {
     try {
       await loadProfile(user);
+      await loadStrategyCatalog();
       await refreshTerminalSnapshot();
       await refreshWalletSnapshot();
+      await loadNotifications();
       if (window.location.hash === "#/admin/setup") {
         await checkAdminConfigured();
         auth.screen = auth.profile?.role === "admin" || auth.adminConfigured === true
@@ -420,6 +445,29 @@ async function initializeWorkspace(user) {
     await workspaceLoadPromise;
   } finally {
     workspaceLoadPromise = null;
+  }
+}
+
+async function loadStrategyCatalog() {
+  const { data, error } = await supabase.rpc("get_strategy_catalog");
+  if (error) {
+    strategyCatalogError = `Live bot catalog unavailable: ${error.message}`;
+    strategyBots = defaultStrategyBots;
+    return;
+  }
+  if (!Array.isArray(data)) {
+    strategyCatalogError = "Live bot catalog returned an invalid response.";
+    strategyBots = defaultStrategyBots;
+    return;
+  }
+  strategyCatalogError = "";
+  strategyBots = data.map((bot) => ({
+    ...bot,
+    price: Number(bot.price) || 0,
+    owned: Boolean(bot.owned),
+  }));
+  if (!strategyBots.some((bot) => bot.id === state.selectedBot || bot.name === state.selectedBot)) {
+    state.selectedBot = strategyBots[0]?.id || "";
   }
 }
 
@@ -773,6 +821,28 @@ async function signOut() {
   auth.user = null;
   auth.profile = null;
   auth.screen = "login";
+  workspaceUserId = null;
+  workspaceLoadPromise = null;
+  walletTransactions = [];
+  walletTrades = [];
+  walletAdminData = null;
+  walletAdminLoaded = false;
+  walletAdminError = "";
+  adminOverviewData = null;
+  adminTransactionRows = [];
+  adminTransactionTotal = 0;
+  adminTransactionOffset = 0;
+  adminUserRows = [];
+  adminUserTotal = 0;
+  adminUserOffset = 0;
+  walletLastAttemptAt = 0;
+  walletAdminLastAttemptAt = 0;
+  notificationPanelOpen = false;
+  notificationData = { unreadCount: 0, items: [] };
+  notificationError = "";
+  notificationLastAttemptAt = 0;
+  strategyBots = defaultStrategyBots;
+  strategyCatalogError = "";
   state.activeView = "trade";
   render();
 }
@@ -829,7 +899,7 @@ function tradingView() {
       <section class="panel bots-panel">
         <div class="panel-heading"><div><h2>Trading bots</h2><p>Signals for the shared PIPMASTER market</p></div><button class="text-button" data-view="bots">Browse all <span>→</span></button></div>
         <div class="bot-cards">
-          ${strategyBots.map((bot) => botCard(bot.name, bot.description, bot.tier, bot.icon, bot.color)).join("")}
+          ${strategyBots.map(botCard).join("")}
         </div>
         <div class="bot-run-row"><span class="bots-note">Review each signal before opening a position. No win probability is guaranteed.</span><button class="subtle-button" data-action="run-bot">Generate signal</button></div>
         ${botSignal ? `<div class="bot-signal"><div><span class="eyebrow">${escapeHtml(botSignal.bot)} · ${isLive ? "LIVE WALLET" : "DEMO"} SIGNAL</span><strong>${botSignal.choice === "over" ? "OVER" : "UNDER"} · ${botSignal.strength} signal strength</strong><small>Indicator signal only; it is not a win probability. Review before placing.</small></div><button class="subtle-button" data-action="use-signal">Use signal</button></div>` : ""}
@@ -866,8 +936,10 @@ function tradePanelView(availableBalance) {
     <div class="trade-footnote">${isLive ? `The ${formatMoney(stake)} stake is reserved from your wallet. Wins return the stake plus the displayed ${state.payout}% profit; losses forfeit the stake. Positions settle against the Live market shown above.` : "Demo outcomes use the Demo market price when the timer expires."}</div>`;
 }
 
-function botCard(name, description, tier, icon, color) {
-  return `<button class="bot-card ${state.selectedBot === name ? "selected" : ""}" data-bot="${escapeHtml(name)}"><span class="bot-symbol" style="--bot-color:${color}">${icon}</span><span class="bot-info"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(description)}</small></span><span class="bot-tier">${escapeHtml(tier)}</span></button>`;
+function botCard(bot) {
+  const selected = state.selectedBot === bot.id || state.selectedBot === bot.name;
+  const accessLabel = bot.price > 0 && !bot.owned ? `Unlock ${formatMoney(bot.price)}` : bot.tier;
+  return `<button class="bot-card ${selected ? "selected" : ""}" data-bot="${escapeHtml(bot.id)}"><span class="bot-symbol" style="--bot-color:${bot.color}">${escapeHtml(bot.icon)}</span><span class="bot-info"><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.description)}</small></span><span class="bot-tier">${escapeHtml(accessLabel)}</span></button>`;
 }
 
 function tradeTable(trades, isLive = false) {
@@ -885,21 +957,126 @@ function historyView() {
 }
 
 function adminView() {
-  return `<section class="page-heading"><div><div class="eyebrow">SHARED MARKET · PIPMASTER MANAGED</div><h1>Admin controls</h1><p>PIPMASTER manages settings for the Live and Demo markets.</p></div><span class="preview-tag">MARKET SETTINGS</span></section>
+  return `<section class="page-heading"><div><div class="eyebrow">PIPMASTER ADMINISTRATION</div><h1>Admin dashboard</h1><p>Manage users, wallet requests, bot access, operating expenses, and shared market settings.</p></div><button class="subtle-button" type="button" data-action="wallet-admin-refresh">Refresh dashboard</button></section>
+    ${walletAdminError ? `<div class="notice notice-warn"><span>ⓘ</span><div><strong>Admin data needs attention</strong><p>${escapeHtml(walletAdminError)}</p></div></div>` : ""}
+    ${adminFinancialSummary()}
+    ${adminTransactionsPanel()}
+    ${adminUsersPanel()}
+    ${adminStrategiesPanel()}
+    ${adminBusinessPanel()}
     <div class="admin-grid">
-      <section class="panel settings-panel"><div class="panel-heading"><div><h2>Shared market</h2><p>Manage the internal PIPMASTER chart.</p></div><span class="setting-icon">⌁</span></div>
+      <section class="panel settings-panel"><div class="panel-heading"><div><h2>Shared market</h2><p>Manage the PIPMASTER Live and Demo markets.</p></div><span class="setting-icon">⌁</span></div>
         ${rangeSetting("volatility", "Volatility", state.volatility, 0.1, 1, 0.01, `${Math.round(state.volatility * 100)}%`, "Changes the size of market price movements.")}
         ${rangeSetting("drift", "Price drift", state.drift, -0.5, 0.5, 0.01, `${state.drift > 0 ? "+" : ""}${Math.round(state.drift * 100)}%`, "Adds a small upward or downward bias to market prices.")}
         ${rangeSetting("chartSpeed", "Chart speed", state.chartSpeed, 0.5, 2, 0.1, `${state.chartSpeed.toFixed(1)}×`, "Changes how quickly market ticks are drawn.")}
         <div class="setting-block"><div class="setting-label"><div><strong>Position payout</strong><small>Profit percentage for new demo and wallet positions.</small></div><div class="range-value"><input type="number" id="payout-input" min="1" max="95" value="${state.payout}">%</div></div><input class="range-input" data-setting="payout" type="range" min="1" max="95" step="1" value="${state.payout}"><div class="setting-hint">Wallet positions snapshot this setting when opened. Returns are not guaranteed.</div></div>
         <div class="setting-block"><div class="setting-label"><div><strong>Trade durations</strong><small>Available position expiry options.</small></div></div><div class="setting-options">${[10, 30, 60, 300].map((seconds) => `<button class="option-chip ${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60} min`}</button>`).join("")}</div></div>
       </section>
-      <section class="panel admin-side-panel"><div class="panel-heading"><div><h2>My account</h2><p>Supabase account data</p></div><span class="status-badge open">ACTIVE</span></div><div class="admin-stat"><span>Demo balance</span><strong>${formatMoney(state.demoBalance)}</strong></div><div class="admin-stat"><span>My wallet balance</span><strong>${formatMoney(state.liveBalance)}</strong></div><div class="admin-stat"><span>Settled demo trades</span><strong>${state.trades.filter((trade) => trade.status === "closed").length}</strong></div><button class="secondary-button wide" data-action="reset-demo">Reset demo balance</button>
-        <div class="admin-separator"></div><div class="admin-helper"><span>ⓘ</span><p>Customer wallet deposits and withdrawals are managed separately from demo positions and market settings.</p></div>
+      <section class="panel admin-side-panel"><div class="panel-heading"><div><h2>My account</h2><p>Administrator account overview</p></div><span class="status-badge open">ACTIVE</span></div><div class="admin-stat"><span>Demo balance</span><strong>${formatMoney(state.demoBalance)}</strong></div><div class="admin-stat"><span>My wallet balance</span><strong>${formatMoney(state.liveBalance)}</strong></div><div class="admin-stat"><span>Registered users</span><strong>${Number(adminOverviewData?.summary?.registeredUsers || 0).toLocaleString()}</strong></div><button class="secondary-button wide" data-action="reset-demo">Reset demo balance</button>
+        <div class="admin-separator"></div><div class="admin-helper"><span>ⓘ</span><p>All user balances, requests, and expense totals below are read from protected Supabase records.</p></div>
       </section>
     </div>
-    <section class="panel bots-admin-panel"><div class="panel-heading"><div><h2>Trading strategies</h2><p>Signals use shared market history and never open positions automatically.</p></div><span class="eyebrow">INDICATOR-BASED · REMOTE RPC</span></div><div class="strategy-table">${strategyBots.map((bot) => `<div class="strategy-row"><span class="bot-symbol" style="--bot-color:${bot.color}">${bot.icon}</span><div><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.type)} · ${escapeHtml(bot.description)}</small></div><span class="status-badge open">SIGNAL</span></div>`).join("")}</div></section>
+    ${adminAnnouncementPanel()}
     ${walletAdminPanel()}`;
+}
+
+function adminFinancialSummary() {
+  const summary = adminOverviewData?.summary;
+  if (!summary) {
+    return `<section class="admin-metric-grid"><div class="panel empty-state">Loading business and account totals…</div></section>`;
+  }
+  const metrics = [
+    ["Registered users", Number(summary.registeredUsers || 0).toLocaleString(), "ALL ACCOUNTS"],
+    ["User wallet balances", formatMoney(summary.totalWalletBalances), "CURRENT CUSTOMER FUNDS"],
+    ["Confirmed deposits", formatMoney(summary.confirmedDeposits), "PAID IN"],
+    ["Withdrawals sent", formatMoney(summary.paidWithdrawalPayouts), "CONFIRMED PAYOUTS"],
+    ["Pending withdrawal reserves", formatMoney(summary.pendingWithdrawalReserves), "FULL AMOUNT RESERVED"],
+    ["Open trade exposure", formatMoney(summary.openTradeMaximumExposure), "MAXIMUM PAYOUT"],
+    ["Paid expenses", formatMoney(summary.paidExpenses), "RECORDED EXPENSES"],
+    ["Unpaid expenses", formatMoney(summary.unpaidExpenses), "RECORDED LIABILITIES"],
+    ["Net retained estimate", formatMoney(summary.estimatedNetRetained), "NOT AUDITED PROFIT"],
+  ];
+  return `<section class="admin-metric-grid">${metrics.map(([label, value, note]) => `<article class="panel admin-metric-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`).join("")}
+    <article class="panel admin-metric-card"><span>Pending requests</span><strong>${Number(summary.pendingTransactions || 0).toLocaleString()}</strong><small>${formatMoney(summary.pendingDepositAmount)} deposit requests</small></article>
+    <article class="panel admin-metric-card"><span>Completed / rejected</span><strong>${Number(summary.completedTransactions || 0).toLocaleString()} / ${Number(summary.rejectedTransactions || 0).toLocaleString()}</strong><small>CONFIRMED / REJECTED REQUESTS</small></article>
+    <article class="panel admin-metric-card"><span>Bot purchases</span><strong>${formatMoney(summary.botSales)}</strong><small>ONE-TIME UNLOCKS · ALREADY IN WALLET BALANCE</small></article>
+    <p class="admin-accounting-note">Net retained estimate = confirmed deposits − completed withdrawals − current user balances − full pending withdrawal reserves − maximum open-trade exposure − recorded paid and unpaid expenses. It is an operational estimate, not audited profit; it excludes external cash, processor fees, taxes, and unrecorded liabilities.</p>
+  </section>`;
+}
+
+function adminTransactionsPanel() {
+  const pageEnd = Math.min(adminTransactionOffset + adminTransactionRows.length, adminTransactionTotal);
+  return `<section class="panel admin-data-panel">
+    <div class="panel-heading"><div><h2>Transaction history</h2><p>Search every deposit and withdrawal by status; pending actions remain available in the review queue below.</p></div><span class="status-badge open">${adminTransactionTotal.toLocaleString()} RECORDS</span></div>
+    <div class="admin-filter-row">
+      <label>Status<select data-admin-transaction-status><option value="all" ${adminTransactionStatus === "all" ? "selected" : ""}>All statuses</option><option value="awaiting_payment" ${adminTransactionStatus === "awaiting_payment" ? "selected" : ""}>Awaiting payment</option><option value="pending" ${adminTransactionStatus === "pending" ? "selected" : ""}>Pending review</option><option value="confirmed" ${adminTransactionStatus === "confirmed" ? "selected" : ""}>Confirmed</option><option value="rejected" ${adminTransactionStatus === "rejected" ? "selected" : ""}>Rejected</option></select></label>
+      <label>Type<select data-admin-transaction-type><option value="all" ${adminTransactionType === "all" ? "selected" : ""}>Deposits and withdrawals</option><option value="deposit" ${adminTransactionType === "deposit" ? "selected" : ""}>Deposits</option><option value="withdrawal" ${adminTransactionType === "withdrawal" ? "selected" : ""}>Withdrawals</option></select></label>
+      <span class="admin-page-count">${adminTransactionTotal ? `${adminTransactionOffset + 1}–${pageEnd} of ${adminTransactionTotal}` : "No records"}</span>
+      <button class="secondary-button" type="button" data-action="transactions-prev" ${adminTransactionOffset <= 0 || adminTransactionLoading ? "disabled" : ""}>Previous</button>
+      <button class="secondary-button" type="button" data-action="transactions-next" ${pageEnd >= adminTransactionTotal || adminTransactionLoading ? "disabled" : ""}>Next</button>
+    </div>
+    ${adminTransactionLoading ? `<div class="empty-state">Loading transaction history…</div>` : adminTransactionRows.length ? `<div class="table-scroll"><table class="admin-table"><thead><tr><th>DATE</th><th>USER</th><th>TYPE</th><th>AMOUNT / PAYOUT</th><th>STATUS</th><th>REFERENCE / NOTE</th></tr></thead><tbody>${adminTransactionRows.map((row) => `<tr><td>${new Date(Number(row.time)).toLocaleString()}</td><td><strong>${escapeHtml(row.fullName || row.email || "User")}</strong><small>${escapeHtml(row.email || "")}</small></td><td>${escapeHtml(row.type)}</td><td>${formatMoney(row.amount)}${row.type === "withdrawal" ? `<small>Fee ${formatMoney(row.fee)} · payout ${formatMoney(row.payout)}</small>` : ""}</td><td><span class="wallet-status ${escapeHtml(row.status)}">${escapeHtml((row.status || "").replaceAll("_", " "))}</span></td><td>${escapeHtml(row.reference || row.note || row.destination?.accountNumber || "—")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>No matching wallet requests</strong><p>Choose another status or transaction type.</p></div>`}
+  </section>`;
+}
+
+function adminUsersPanel() {
+  const pageEnd = Math.min(adminUserOffset + adminUserRows.length, adminUserTotal);
+  return `<section class="panel admin-data-panel">
+    <div class="panel-heading"><div><h2>Registered users & balances</h2><p>Search registered accounts and review their current wallet balance.</p></div><span class="status-badge open">${adminUserTotal.toLocaleString()} USERS</span></div>
+    <form class="admin-filter-row" data-form="admin-user-search"><label class="admin-search-field">Search users<input name="search" value="${escapeHtml(adminUserSearch)}" placeholder="Email, name, or username"></label><button class="auth-primary compact" type="submit">Search</button><span class="admin-page-count">${adminUserTotal ? `${adminUserOffset + 1}–${pageEnd} of ${adminUserTotal}` : "No users"}</span><button class="secondary-button" type="button" data-action="users-prev" ${adminUserOffset <= 0 || adminUserLoading ? "disabled" : ""}>Previous</button><button class="secondary-button" type="button" data-action="users-next" ${pageEnd >= adminUserTotal || adminUserLoading ? "disabled" : ""}>Next</button></form>
+    ${adminUserLoading ? `<div class="empty-state">Loading registered users…</div>` : adminUserRows.length ? `<div class="table-scroll"><table class="admin-table"><thead><tr><th>ACCOUNT</th><th>ROLE</th><th>WALLET BALANCE</th><th>REGISTERED</th></tr></thead><tbody>${adminUserRows.map((user) => `<tr><td><strong>${escapeHtml(user.fullName || user.email || "User")}</strong><small>${escapeHtml(user.email || "")}${user.username ? ` · @${escapeHtml(user.username)}` : ""}</small></td><td>${escapeHtml(user.role || "user")}</td><td>${formatMoney(user.balance)}</td><td>${new Date(Number(user.createdAt)).toLocaleDateString()}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>No registered users found</strong><p>Try a different search.</p></div>`}
+  </section>`;
+}
+
+function strategyEditorFields(strategy = {}) {
+  const keys = ["Pulse", "Sentry", "Orbit", "LAMIA", "INSTA", "SKPOT", "VULJA"];
+  return `<div class="strategy-editor-fields">
+    <label>Name<input name="name" value="${escapeHtml(strategy.name || "")}" maxlength="80" required></label>
+    <label>Signal algorithm<select name="algorithm_key" required>${keys.map((key) => `<option value="${key}" ${strategy.strategyKey === key ? "selected" : ""}>${key}</option>`).join("")}</select></label>
+    <label>Bot type<input name="strategy_type" value="${escapeHtml(strategy.type || "")}" maxlength="80" required></label>
+    <label>Tier label<input name="tier" value="${escapeHtml(strategy.tier || "Standard")}" maxlength="40" required></label>
+    <label>One-time price (USD)<input name="price_usd" type="number" min="0" max="100000" step="0.01" value="${Number(strategy.price || 0).toFixed(2)}" required></label>
+    <label>Icon<input name="icon" value="${escapeHtml(strategy.icon || "◈")}" maxlength="8" required></label>
+    <label>Color<input name="color" type="color" value="${escapeHtml(strategy.color || "#61b8ed")}" required></label>
+    <label class="strategy-description-field">Description<input name="description" value="${escapeHtml(strategy.description || "")}" maxlength="300" required></label>
+  </div>`;
+}
+
+function adminStrategiesPanel() {
+  const strategies = adminOverviewData?.strategies || [];
+  return `<section class="panel admin-data-panel bots-admin-panel">
+    <div class="panel-heading"><div><h2>Bot catalog & pricing</h2><p>One-time wallet unlocks. Removing a bot hides it from new users; prior purchases and activity stay stored. New bot names use one of the supported signal algorithms.</p></div><span class="eyebrow">${strategies.length} STORED BOTS</span></div>
+    ${strategies.map((bot) => `<article class="admin-strategy-item ${bot.active ? "" : "inactive"}">
+      <div class="admin-strategy-summary"><span class="bot-symbol" style="--bot-color:${bot.color}">${escapeHtml(bot.icon)}</span><div><strong>${escapeHtml(bot.name)}</strong><small>${Number(bot.purchases || 0).toLocaleString()} unlocks · ${formatMoney(bot.sales)} sales · ${bot.active ? "Visible in catalog" : "Removed from catalog"}</small></div><span class="status-badge ${bot.active ? "open" : "rejected"}">${bot.active ? "ACTIVE" : "REMOVED"}</span></div>
+      <form class="admin-strategy-form" data-form="admin-strategy-edit" data-id="${escapeHtml(bot.id)}">${strategyEditorFields(bot)}<div class="admin-form-actions"><button class="auth-primary compact" type="submit">Save bot</button><button class="secondary-button" type="button" data-action="toggle-strategy" data-id="${escapeHtml(bot.id)}" data-active="${bot.active}">${bot.active ? "Remove from market" : "Restore bot"}</button></div></form>
+    </article>`).join("") || `<div class="empty-state">Loading stored bot catalog…</div>`}
+    <details class="admin-create-details"><summary>Add a bot to the catalog</summary><form class="admin-strategy-form" data-form="admin-strategy-add">${strategyEditorFields()}<div class="admin-form-actions"><button class="auth-primary compact" type="submit">Add bot</button></div></form></details>
+  </section>`;
+}
+
+function adminBusinessPanel() {
+  const expenses = adminOverviewData?.expenses || [];
+  const categories = ["Operations", "Hosting", "Marketing", "Payroll", "Banking fees", "Equipment", "Other"];
+  return `<section class="panel admin-data-panel">
+    <div class="panel-heading"><div><h2>Business expenses</h2><p>Record paid costs and unpaid accrued liabilities in USD. Paid and unpaid non-void records reduce the net-retained estimate.</p></div><span class="status-badge open">${formatMoney(adminOverviewData?.summary?.paidExpenses || 0)} PAID</span></div>
+    <form class="admin-expense-form" data-form="admin-expense">
+      <label>Category<select name="category" required>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("")}</select></label>
+      <label>Amount (USD)<input name="amount_usd" type="number" min="0.01" max="100000000" step="0.01" required></label>
+      <label>Date<input name="expense_date" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label>
+      <label>Status<select name="status"><option value="unpaid">Unpaid / accrued</option><option value="paid">Paid</option></select></label>
+      <label class="expense-description-field">Description<input name="description" maxlength="500" placeholder="Supplier, reason, or accounting note"></label>
+      <button class="auth-primary compact" type="submit">Record expense</button>
+    </form>
+    ${expenses.length ? `<div class="table-scroll"><table class="admin-table"><thead><tr><th>DATE</th><th>CATEGORY / DESCRIPTION</th><th>AMOUNT</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>${expenses.map((expense) => `<tr><td>${escapeHtml(expense.date)}</td><td><strong>${escapeHtml(expense.category)}</strong><small>${escapeHtml(expense.description || "—")}</small></td><td>${formatMoney(expense.amount)}</td><td><span class="wallet-status ${expense.status === "paid" ? "confirmed" : expense.status === "void" ? "rejected" : "pending"}">${escapeHtml(expense.status)}</span></td><td>${expense.status === "void" ? "—" : `<button class="table-action" type="button" data-action="expense-status" data-id="${escapeHtml(expense.id)}" data-status="${expense.status === "paid" ? "unpaid" : "paid"}">${expense.status === "paid" ? "Mark unpaid" : "Mark paid"}</button><button class="table-action danger" type="button" data-action="expense-status" data-id="${escapeHtml(expense.id)}" data-status="void">Void</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>No business expenses recorded</strong><p>New expenses will appear here and remain in the database.</p></div>`}
+    <p class="admin-accounting-note">Expense history is retained; voiding a record excludes it from totals without deleting the audit record. The dashboard shows the latest 100 expense records.</p>
+  </section>`;
+}
+
+function adminAnnouncementPanel() {
+  return `<section class="panel admin-data-panel">
+    <div class="panel-heading"><div><h2>Notify all users</h2><p>Send a persistent in-app announcement to every registered account, including administrators.</p></div></div>
+    <form class="admin-announcement-form" data-form="admin-announcement"><label>Title<input name="title" maxlength="120" required></label><label>Message<textarea name="message" rows="3" maxlength="500" required></textarea></label><button class="auth-primary compact" type="submit">Publish announcement</button></form>
+  </section>`;
 }
 
 function walletAdminPanel() {
@@ -956,15 +1133,80 @@ async function loadWalletAdminData() {
   walletAdminLoading = true;
   walletAdminError = "";
   try {
-    const { data, error } = await supabase.rpc("get_wallet_admin_snapshot");
-    if (error) throw error;
-    walletAdminData = data;
+    const [walletResult, overviewResult, transactionsResult, usersResult] = await Promise.all([
+      supabase.rpc("get_wallet_admin_snapshot"),
+      supabase.rpc("get_admin_overview"),
+      supabase.rpc("get_admin_transactions", {
+        p_status: adminTransactionStatus,
+        p_type: adminTransactionType,
+        p_offset: adminTransactionOffset,
+        p_limit: 50,
+      }),
+      supabase.rpc("get_admin_users", {
+        p_search: adminUserSearch,
+        p_offset: adminUserOffset,
+        p_limit: 50,
+      }),
+    ]);
+    if (walletResult.error) throw new Error(`Wallet requests: ${walletResult.error.message}`);
+    if (overviewResult.error) throw new Error(`Dashboard totals: ${overviewResult.error.message}`);
+    if (transactionsResult.error) throw new Error(`Transaction history: ${transactionsResult.error.message}`);
+    if (usersResult.error) throw new Error(`User list: ${usersResult.error.message}`);
+    walletAdminData = walletResult.data;
+    adminOverviewData = overviewResult.data;
+    adminTransactionRows = transactionsResult.data?.items || [];
+    adminTransactionTotal = Number(transactionsResult.data?.total || 0);
+    adminUserRows = usersResult.data?.items || [];
+    adminUserTotal = Number(usersResult.data?.total || 0);
     walletAdminLoaded = true;
   } catch (error) {
     walletAdminError = error.message || "Could not load wallet administration data.";
     walletAdminLoaded = true;
   } finally {
     walletAdminLoading = false;
+    if (state.activeView === "admin") render();
+  }
+}
+
+async function loadAdminTransactions() {
+  if (auth.profile?.role !== "admin" || adminTransactionLoading) return;
+  adminTransactionLoading = true;
+  if (state.activeView === "admin") render();
+  try {
+    const { data, error } = await supabase.rpc("get_admin_transactions", {
+      p_status: adminTransactionStatus,
+      p_type: adminTransactionType,
+      p_offset: adminTransactionOffset,
+      p_limit: 50,
+    });
+    if (error) throw error;
+    adminTransactionRows = data?.items || [];
+    adminTransactionTotal = Number(data?.total || 0);
+  } catch (error) {
+    walletAdminError = `Transaction history: ${error.message}`;
+  } finally {
+    adminTransactionLoading = false;
+    if (state.activeView === "admin") render();
+  }
+}
+
+async function loadAdminUsers() {
+  if (auth.profile?.role !== "admin" || adminUserLoading) return;
+  adminUserLoading = true;
+  if (state.activeView === "admin") render();
+  try {
+    const { data, error } = await supabase.rpc("get_admin_users", {
+      p_search: adminUserSearch,
+      p_offset: adminUserOffset,
+      p_limit: 50,
+    });
+    if (error) throw error;
+    adminUserRows = data?.items || [];
+    adminUserTotal = Number(data?.total || 0);
+  } catch (error) {
+    walletAdminError = `User list: ${error.message}`;
+  } finally {
+    adminUserLoading = false;
     if (state.activeView === "admin") render();
   }
 }
@@ -977,7 +1219,11 @@ function simpleView(view) {
   if (view === "wallet") return walletView();
   const titles = { bots: ["Trading bot signals", "Explore indicator-based strategies for the shared PIPMASTER market."], profile: ["Profile", "Manage account information stored securely in Supabase."] };
   const [title, subtitle] = titles[view] || ["Page not found", "Choose a page from the navigation."];
-  return `<section class="page-heading"><div><div class="eyebrow">PIPMASTER</div><h1>${title}</h1><p>${subtitle}</p></div></section><section class="bot-list">${strategyBots.map((bot) => `<button class="bot-market-card ${state.selectedBot === bot.name ? "selected" : ""}" data-bot="${escapeHtml(bot.name)}"><span class="bot-symbol" style="--bot-color:${bot.color}">${bot.icon}</span><span><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.type)} · ${escapeHtml(bot.description)}</small></span><span class="bot-tier">${escapeHtml(bot.tier)}</span><span class="bot-arrow">→</span></button>`).join("")}</section>${botSignal ? `<div class="bot-signal"><div><span class="eyebrow">${escapeHtml(botSignal.bot)} · ${state.mode === "live" ? "LIVE WALLET" : "DEMO"} SIGNAL</span><strong>${botSignal.choice.toUpperCase()} · ${botSignal.strength} signal strength</strong><small>Indicator signal only; not a win probability. Review before placing.</small></div><button class="subtle-button" data-action="use-signal">Use signal</button></div>` : ""}<button class="auth-primary compact bot-signal-action" type="button" data-action="run-bot">Generate ${escapeHtml(state.selectedBot)} signal</button>`;
+  return `<section class="page-heading"><div><div class="eyebrow">PIPMASTER</div><h1>${title}</h1><p>${subtitle}</p></div></section>
+    ${strategyCatalogError ? `<div class="notice notice-warn"><span>ⓘ</span><div><strong>Bot catalog could not be refreshed</strong><p>${escapeHtml(strategyCatalogError)} Existing built-in strategies are shown; purchases require the database migration.</p></div></div>` : ""}
+    <section class="bot-list">${strategyBots.map((bot) => `<button class="bot-market-card ${state.selectedBot === bot.id || state.selectedBot === bot.name ? "selected" : ""}" data-bot="${escapeHtml(bot.id)}"><span class="bot-symbol" style="--bot-color:${bot.color}">${escapeHtml(bot.icon)}</span><span><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.type)} · ${escapeHtml(bot.description)}</small></span><span class="bot-tier">${bot.price > 0 && !bot.owned ? `Unlock ${formatMoney(bot.price)}` : escapeHtml(bot.tier)}</span><span class="bot-arrow">${bot.owned || !bot.price ? "→" : "BUY"}</span></button>`).join("")}</section>
+    ${botSignal ? `<div class="bot-signal"><div><span class="eyebrow">${escapeHtml(botSignal.bot)} · ${state.mode === "live" ? "LIVE WALLET" : "DEMO"} SIGNAL</span><strong>${botSignal.choice.toUpperCase()} · ${botSignal.strength} signal strength</strong><small>Indicator signal only; not a win probability. Review before placing.</small></div><button class="subtle-button" data-action="use-signal">Use signal</button></div>` : ""}
+    <button class="auth-primary compact bot-signal-action" type="button" data-action="run-bot" ${strategyBots.length ? "" : "disabled"}>Generate ${escapeHtml(strategyBots.find((bot) => bot.id === state.selectedBot || bot.name === state.selectedBot)?.name || "bot")} signal</button>`;
 }
 
 function walletView() {
@@ -1099,11 +1345,55 @@ function bindEvents() {
   }));
   app.querySelectorAll(".wallet-form").forEach((form) => form.addEventListener("submit", handleWalletForm));
   app.querySelector('[data-form="wallet-settings"]')?.addEventListener("submit", saveWalletSettings);
-  app.querySelector('[data-action="wallet-admin-refresh"]')?.addEventListener("click", () => {
+  app.querySelectorAll('[data-action="wallet-admin-refresh"]').forEach((button) => button.addEventListener("click", () => {
     walletAdminLoaded = false;
     loadWalletAdminData();
-  });
+  }));
   app.querySelectorAll('[data-action="review-wallet"]').forEach((button) => button.addEventListener("click", reviewWalletRequest));
+  app.querySelectorAll('[data-form="admin-strategy-edit"], [data-form="admin-strategy-add"]').forEach((form) => form.addEventListener("submit", saveAdminStrategy));
+  app.querySelectorAll('[data-action="toggle-strategy"]').forEach((button) => button.addEventListener("click", toggleAdminStrategy));
+  app.querySelector('[data-form="admin-expense"]')?.addEventListener("submit", saveAdminExpense);
+  app.querySelectorAll('[data-action="expense-status"]').forEach((button) => button.addEventListener("click", updateAdminExpense));
+  app.querySelector('[data-form="admin-announcement"]')?.addEventListener("submit", publishAdminAnnouncement);
+  app.querySelector('[data-form="admin-user-search"]')?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    adminUserSearch = String(new FormData(event.currentTarget).get("search") || "").trim();
+    adminUserOffset = 0;
+    loadAdminUsers();
+  });
+  app.querySelector("[data-admin-transaction-status]")?.addEventListener("change", (event) => {
+    adminTransactionStatus = event.currentTarget.value;
+    adminTransactionOffset = 0;
+    loadAdminTransactions();
+  });
+  app.querySelector("[data-admin-transaction-type]")?.addEventListener("change", (event) => {
+    adminTransactionType = event.currentTarget.value;
+    adminTransactionOffset = 0;
+    loadAdminTransactions();
+  });
+  app.querySelector('[data-action="transactions-prev"]')?.addEventListener("click", () => {
+    adminTransactionOffset = Math.max(0, adminTransactionOffset - 50);
+    loadAdminTransactions();
+  });
+  app.querySelector('[data-action="transactions-next"]')?.addEventListener("click", () => {
+    if (adminTransactionOffset + 50 < adminTransactionTotal) adminTransactionOffset += 50;
+    loadAdminTransactions();
+  });
+  app.querySelector('[data-action="users-prev"]')?.addEventListener("click", () => {
+    adminUserOffset = Math.max(0, adminUserOffset - 50);
+    loadAdminUsers();
+  });
+  app.querySelector('[data-action="users-next"]')?.addEventListener("click", () => {
+    if (adminUserOffset + 50 < adminUserTotal) adminUserOffset += 50;
+    loadAdminUsers();
+  });
+  app.querySelector('[data-action="notifications"]')?.addEventListener("click", async () => {
+    notificationPanelOpen = !notificationPanelOpen;
+    if (notificationPanelOpen) await loadNotifications();
+    render();
+  });
+  app.querySelector('[data-action="notifications-read-all"]')?.addEventListener("click", markAllNotificationsRead);
+  app.querySelectorAll("[data-notification-id]").forEach((button) => button.addEventListener("click", markNotificationRead));
   app.querySelector('.wallet-form[data-form="wallet-withdrawal"] [name="amount_usd"]')?.addEventListener("input", updateWithdrawalPreview);
   app.querySelectorAll('[data-action="admin-gate"]').forEach((button) => button.addEventListener("click", () => {
     if (auth.profile?.role === "admin") {
@@ -1142,7 +1432,8 @@ function bindEvents() {
   app.querySelectorAll("[data-bot]").forEach((button) => button.addEventListener("click", () => {
     state.selectedBot = button.dataset.bot;
     app.querySelectorAll("[data-bot]").forEach((item) => item.classList.toggle("selected", item.dataset.bot === state.selectedBot));
-    showToast(`${state.selectedBot} strategy selected`);
+    const selected = strategyBots.find((bot) => bot.id === state.selectedBot || bot.name === state.selectedBot);
+    showToast(`${selected?.name || state.selectedBot} strategy selected`);
   }));
   app.querySelectorAll("[data-quick-stake]").forEach((button) => button.addEventListener("click", () => setStake(Number(button.dataset.quickStake))));
   app.querySelectorAll("[data-stake]").forEach((button) => button.addEventListener("click", () => setStake(state.stake + (button.dataset.stake === "+" ? 5 : -5))));
@@ -1301,6 +1592,205 @@ async function saveWalletSettings(event) {
   }
 }
 
+function botIdFromName(name) {
+  const slug = String(name).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return slug.length >= 2 ? slug : `${slug || "new"}-bot`;
+}
+
+async function saveAdminStrategy(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  const isNew = form.dataset.form === "admin-strategy-add";
+  const id = isNew ? botIdFromName(values.name) : form.dataset.id;
+  if (isNew && (adminOverviewData?.strategies || []).some((bot) => bot.id === id || bot.name.toLowerCase() === String(values.name).trim().toLowerCase())) {
+    showToast("A bot with that name already exists. Choose a different name.");
+    return;
+  }
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const { error } = await supabase.rpc("save_admin_strategy", {
+      p_id: id,
+      p_name: String(values.name).trim(),
+      p_algorithm_key: values.algorithm_key,
+      p_strategy_type: String(values.strategy_type).trim(),
+      p_description: String(values.description).trim(),
+      p_tier: String(values.tier).trim(),
+      p_icon: String(values.icon).trim(),
+      p_color: values.color,
+      p_price_usd: Number(values.price_usd),
+    });
+    if (error) throw error;
+    await loadStrategyCatalog();
+    walletAdminLoaded = false;
+    await loadWalletAdminData();
+    showToast(isNew ? "Bot added to the catalog." : "Bot details and price saved.");
+  } catch (error) {
+    showToast(`Could not save bot: ${error.message}`);
+  } finally {
+    if (submitButton?.isConnected) submitButton.disabled = false;
+  }
+}
+
+async function toggleAdminStrategy(event) {
+  const button = event.currentTarget;
+  const active = button.dataset.active !== "true";
+  if (!active && !window.confirm("Remove this bot from the user catalog? Existing purchases and records will be retained. You can restore it later.")) return;
+  button.disabled = true;
+  try {
+    const { error } = await supabase.rpc("set_admin_strategy_active", {
+      p_id: button.dataset.id,
+      p_active: active,
+    });
+    if (error) throw error;
+    await loadStrategyCatalog();
+    walletAdminLoaded = false;
+    await loadWalletAdminData();
+    showToast(active ? "Bot restored to the user catalog." : "Bot removed from the user catalog. Purchase records were retained.");
+  } catch (error) {
+    showToast(`Could not update bot availability: ${error.message}`);
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+}
+
+async function saveAdminExpense(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const { error } = await supabase.rpc("add_admin_expense", {
+      p_category: String(values.category).trim(),
+      p_description: String(values.description || "").trim(),
+      p_amount_usd: Number(values.amount_usd),
+      p_expense_date: values.expense_date,
+      p_status: values.status,
+    });
+    if (error) throw error;
+    walletAdminLoaded = false;
+    await loadWalletAdminData();
+    showToast("Expense recorded.");
+  } catch (error) {
+    showToast(`Could not record expense: ${error.message}`);
+  } finally {
+    if (submitButton?.isConnected) submitButton.disabled = false;
+  }
+}
+
+async function updateAdminExpense(event) {
+  const button = event.currentTarget;
+  const status = button.dataset.status;
+  if (status === "void" && !window.confirm("Void this expense record? It will remain stored but will no longer affect the estimate.")) return;
+  button.disabled = true;
+  try {
+    const { error } = await supabase.rpc("set_admin_expense_status", {
+      p_expense_id: button.dataset.id,
+      p_status: status,
+    });
+    if (error) throw error;
+    walletAdminLoaded = false;
+    await loadWalletAdminData();
+    showToast(status === "void" ? "Expense voided; the record remains in history." : `Expense marked ${status}.`);
+  } catch (error) {
+    showToast(`Could not update expense: ${error.message}`);
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+}
+
+async function publishAdminAnnouncement(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  if (!window.confirm("Publish this announcement to every registered user?")) return;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const { data, error } = await supabase.rpc("publish_admin_announcement", {
+      p_title: String(values.title).trim(),
+      p_message: String(values.message).trim(),
+    });
+    if (error) throw error;
+    form.reset();
+    showToast(`Announcement sent to ${Number(data || 0).toLocaleString()} accounts.`);
+  } catch (error) {
+    showToast(`Could not publish announcement: ${error.message}`);
+  } finally {
+    if (submitButton?.isConnected) submitButton.disabled = false;
+  }
+}
+
+function notificationPanel() {
+  const items = notificationData.items || [];
+  return `<section class="notification-popover" aria-label="Notifications">
+    <div class="notification-panel-heading"><div><strong>Notifications</strong><small>${Number(notificationData.unreadCount || 0)} unread</small></div><button class="text-button" type="button" data-action="notifications-read-all" ${notificationData.unreadCount ? "" : "disabled"}>Mark all read</button></div>
+    ${notificationError ? `<div class="notice notice-warn"><span>ⓘ</span><div><strong>Notifications unavailable</strong><p>${escapeHtml(notificationError)}</p></div></div>` : ""}
+    ${items.length ? `<div class="notification-list">${items.map((item) => `<button type="button" class="notification-item ${item.readAt ? "" : "unread"}" data-notification-id="${escapeHtml(item.id)}" data-notification-type="${escapeHtml(item.type)}"><span class="notification-dot"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}</small><time>${new Date(Number(item.time)).toLocaleString()}</time></span></button>`).join("")}</div>` : `<div class="empty-state"><strong>You're all caught up</strong><p>Account, wallet, and trade updates will appear here.</p></div>`}
+  </section>`;
+}
+
+async function loadNotifications() {
+  if (!auth.user || notificationLoading) return;
+  notificationLoading = true;
+  notificationLastAttemptAt = Date.now();
+  try {
+    const { data, error } = await supabase.rpc("get_notifications_snapshot");
+    if (error) throw error;
+    const previous = JSON.stringify(notificationData);
+    notificationData = {
+      unreadCount: Number(data?.unreadCount || 0),
+      items: Array.isArray(data?.items) ? data.items : [],
+    };
+    notificationError = "";
+    syncNotificationBadge();
+    if (notificationPanelOpen && previous !== JSON.stringify(notificationData) && document.querySelector(".notification-popover")) render();
+  } catch (error) {
+    notificationError = error.message || "Could not load notifications.";
+    syncNotificationBadge();
+  } finally {
+    notificationLoading = false;
+  }
+}
+
+function syncNotificationBadge() {
+  const badge = app.querySelector(".notification-count");
+  if (!badge) return;
+  badge.textContent = notificationData.unreadCount > 99 ? "99+" : notificationData.unreadCount ? String(notificationData.unreadCount) : "";
+  badge.classList.toggle("visible", notificationData.unreadCount > 0);
+}
+
+async function markNotificationRead(event) {
+  const button = event.currentTarget;
+  const type = button.dataset.notificationType;
+  try {
+    const { error } = await supabase.rpc("mark_notification_read", { p_notification_id: button.dataset.notificationId });
+    if (error) throw error;
+    if (type === "admin-wallet" && auth.profile?.role === "admin") state.activeView = "admin";
+    else if (type === "wallet") {
+      state.activeView = "wallet";
+      walletScreen = "overview";
+    } else if (type === "wallet-trade" || type === "demo-trade") state.activeView = "history";
+    await loadNotifications();
+    render();
+  } catch (error) {
+    showToast(`Could not mark notification read: ${error.message}`);
+  }
+}
+
+async function markAllNotificationsRead() {
+  try {
+    const { error } = await supabase.rpc("mark_all_notifications_read");
+    if (error) throw error;
+    await loadNotifications();
+    render();
+  } catch (error) {
+    showToast(`Could not mark notifications read: ${error.message}`);
+  }
+}
+
 async function reviewWalletRequest(event) {
   const button = event.currentTarget;
   const approve = button.dataset.approve === "true";
@@ -1448,7 +1938,7 @@ async function clearHistory() {
 }
 
 async function runScanner() {
-  const { data, error } = await supabase.rpc("analyze_market", { p_strategy: "scanner" });
+  const { data, error } = await supabase.rpc("analyze_scanner_market");
   if (error) {
     showToast(`Could not run AI Market Scanner: ${error.message}`);
     return;
@@ -1458,7 +1948,28 @@ async function runScanner() {
 }
 
 async function runBot() {
-  const { data, error } = await supabase.rpc("analyze_market", { p_strategy: state.selectedBot });
+  const bot = strategyBots.find((item) => item.id === state.selectedBot || item.name === state.selectedBot);
+  if (!bot) {
+    showToast("Select an available bot first.");
+    return;
+  }
+  if (!bot.owned) {
+    if (!window.confirm(`Unlock ${bot.name} for ${formatMoney(bot.price)} from your wallet? This is a one-time purchase.`)) return;
+    const { error: purchaseError } = await supabase.rpc("purchase_strategy", { p_strategy_id: bot.id });
+    if (purchaseError) {
+      showToast(`Could not unlock ${bot.name}: ${purchaseError.message}`);
+      return;
+    }
+    try {
+      await Promise.all([loadStrategyCatalog(), refreshWalletSnapshot()]);
+      render();
+      showToast(`${bot.name} unlocked for ${formatMoney(bot.price)}.`);
+    } catch (error) {
+      showToast(`${bot.name} was unlocked, but account refresh failed: ${error.message}`);
+      return;
+    }
+  }
+  const { data, error } = await supabase.rpc("analyze_bot_market", { p_strategy_id: bot.id });
   if (error) {
     showToast(`Could not generate remote strategy signal: ${error.message}`);
     return;
@@ -1470,7 +1981,7 @@ async function runBot() {
     return;
   }
   botSignal = {
-    bot: state.selectedBot,
+    bot: bot.name,
     choice: data.signal,
     strength: `${Number(data.strength)}%`,
   };
@@ -1521,6 +2032,7 @@ function startChart() {
       walletAdminLoaded = false;
       await loadWalletAdminData();
     }
+    if (Date.now() - notificationLastAttemptAt >= 15000) await loadNotifications();
     if (pollVersion === chartPollVersion) {
       chartTimer = window.setTimeout(poll, Math.max(250, Math.min(2000, 900 / state.chartSpeed)));
     }
