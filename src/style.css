@@ -194,3 +194,79 @@ button { cursor: pointer; }
   .wallet-review-heading { flex-direction: column; }
   .wallet-review-actions > button { flex: 1; }
 }
+
+/* Readable auth and admin layouts across desktop and mobile. */
+.auth-screen { min-height: 100vh; min-height: 100dvh; }
+.auth-card { width: min(calc(100% - 32px), 470px); }
+.auth-brand { font-size: 19px; }
+.auth-heading h1 { font-size: 28px; }
+.auth-heading p { font-size: 14px; }
+.auth-form { gap: 16px; }
+.auth-form > label, .profile-fields > label { font-size: 13px; }
+.auth-form input, .profile-fields input { height: 46px; font-size: 15px; }
+.password-toggle { font-size: 12px; }
+.auth-options, .remember-option, .auth-switch, .auth-link { font-size: 12px; }
+.auth-primary { min-height: 46px; font-size: 14px; }
+.auth-alert, .auth-security { font-size: 12px; }
+.auth-security { line-height: 1.55; }
+.auth-switch { margin-top: 20px; }
+
+.admin-grid { align-items: start; }
+.panel-heading h2 { font-size: 14px; }
+.panel-heading p { font-size: 12px; line-height: 1.45; }
+.setting-label strong { font-size: 12px; }
+.setting-label small, .setting-hint, .admin-stat, .admin-helper p { font-size: 11px; }
+.range-value, .option-chip, .admin-stat strong { font-size: 12px; }
+.strategy-row strong { font-size: 12px; }
+.strategy-row small { font-size: 11px; }
+.wallet-admin-form .profile-fields > label { font-size: 12px; }
+.wallet-admin-form input, .wallet-admin-form textarea { min-height: 44px; font-size: 14px; }
+.wallet-review-heading strong { font-size: 18px; }
+.wallet-review-details { font-size: 12px; }
+.wallet-review-note { font-size: 12px; }
+
+@media (max-width: 820px) {
+  .content { width: 100%; }
+  .admin-grid { grid-template-columns: 1fr; }
+  .wallet-admin-form .profile-fields { grid-template-columns: 1fr 1fr; }
+  .wallet-review-actions { flex-wrap: wrap; }
+}
+
+@media (max-width: 540px) {
+  body { font-size: 15px; }
+  .auth-screen { align-items: center; padding: 16px 12px; }
+  .auth-card { width: 100%; max-height: calc(100dvh - 32px); overflow-y: auto; margin: 0; padding: 22px 18px; border-radius: 12px; }
+  .auth-brand { margin-bottom: 20px; font-size: 17px; }
+  .auth-heading { margin-bottom: 18px; }
+  .auth-heading h1 { font-size: 25px; }
+  .auth-heading p { font-size: 13px; }
+  .auth-form { gap: 13px; }
+  .auth-form > label { font-size: 12px; }
+  .auth-form input { height: 48px; font-size: 16px; }
+  .auth-primary { min-height: 48px; font-size: 15px; }
+  .auth-options, .remember-option, .auth-switch, .auth-link { font-size: 11px; }
+  .auth-security { margin-top: 16px; font-size: 10px; }
+  .auth-alert { font-size: 11px; }
+
+  .content { padding: 16px 12px 14px; }
+  .page-heading h1 { font-size: 24px; }
+  .page-heading p { font-size: 12px; line-height: 1.45; }
+  .panel-heading { align-items: flex-start; }
+  .panel-heading h2 { font-size: 13px; }
+  .panel-heading p { font-size: 10px; }
+  .eyebrow { font-size: 9px; }
+  .setting-label strong { font-size: 12px; }
+  .setting-label small, .setting-hint, .admin-stat, .admin-helper p { font-size: 10px; }
+  .admin-stat strong { font-size: 14px; }
+  .strategy-row { padding: 13px 12px; }
+  .strategy-row strong { font-size: 12px; }
+  .strategy-row small { font-size: 10px; }
+  .wallet-admin-form { padding: 14px; }
+  .wallet-admin-form .profile-fields { grid-template-columns: 1fr; }
+  .wallet-admin-form input, .wallet-admin-form textarea { min-height: 46px; font-size: 16px; }
+  .wallet-review-heading { align-items: flex-start; }
+  .wallet-review-heading strong { font-size: 17px; }
+  .wallet-review-details { font-size: 11px; line-height: 1.5; }
+  .wallet-review-actions { display: grid; grid-template-columns: 1fr; }
+  .wallet-review-actions > button { width: 100%; min-height: 44px; }
+}
