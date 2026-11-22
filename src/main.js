@@ -49,6 +49,7 @@ app?.addEventListener("click", (event) => {
   auth.screen = "admin-create";
   auth.message = "";
   auth.messageType = "info";
+  window.location.hash = "#/admin/setup";
   render();
 });
 
@@ -247,7 +248,7 @@ function renderAuth() {
     ${auth.message ? `<div class="auth-alert ${auth.messageType}">${escapeHtml(auth.message)}</div>` : ""}
     ${auth.profileError ? `<div class="auth-alert error">${escapeHtml(auth.profileError)}</div>` : ""}
     ${form}
-    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>${auth.adminConfigured !== true ? `<button class="auth-setup-button" type="button" data-action="admin-create">Create one-time admin account</button>` : ""}` : ""}</div>` : ""}
+    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>${!auth.user && auth.adminConfigured !== true ? `<button class="auth-setup-button" type="button" data-action="admin-create">Create one-time admin account</button>` : ""}` : ""}</div>` : ""}
     <button class="auth-link centered funds-terms-link" data-action="show-funds-terms">Wallet funds terms</button>
     <div class="auth-security"><span>⌑</span> Passwords are handled by Supabase Auth and are never stored in this site’s source code.</div>
   </section></main>`;
@@ -370,7 +371,14 @@ async function initializeWorkspace(user) {
       await loadProfile(user);
       await refreshTerminalSnapshot();
       await refreshWalletSnapshot();
-      auth.screen = window.location.hash.includes("type=recovery") ? "reset-password" : "workspace";
+      if (window.location.hash === "#/admin/setup") {
+        await checkAdminConfigured();
+        auth.screen = auth.profile?.role === "admin" || auth.adminConfigured === true
+          ? "admin-login"
+          : "admin-create";
+      } else {
+        auth.screen = window.location.hash.includes("type=recovery") ? "reset-password" : "workspace";
+      }
       startChart();
     } catch (error) {
       workspaceUserId = null;
@@ -396,7 +404,13 @@ async function checkAdminConfigured() {
 
 async function beginAuth() {
   const recoveringPassword = window.location.hash.includes("type=recovery");
-  auth.screen = recoveringPassword ? "reset-password" : window.location.hash === "#/signup" ? "signup" : "login";
+  auth.screen = recoveringPassword
+    ? "reset-password"
+    : window.location.hash === "#/signup"
+      ? "signup"
+      : window.location.hash === "#/admin/setup"
+        ? "admin-create"
+        : "login";
   if (!supabaseConfigured) {
     auth.ready = true;
     render();
@@ -481,6 +495,7 @@ function bindAuthEvents() {
     auth.screen = "admin-create";
     auth.message = "";
     auth.messageType = "info";
+    window.location.hash = "#/admin/setup";
     render();
   }));
   app.querySelectorAll('[data-action="leave-admin"]').forEach((button) => button.addEventListener("click", () => {
