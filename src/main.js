@@ -138,7 +138,6 @@ function render() {
           ${navItem("wallet", "▣", "Wallet")}
         </nav>
         <div class="toast" id="toast" role="status"></div>
-        <footer class="disclaimer"><span>ⓘ</span> Wallet positions use PIPMASTER's internal market, not a broker or exchange; losses can forfeit the full stake. Demo funds are separate and KSh values are estimates.</footer>
       </main>
     </div>`;
   bindEvents();
@@ -794,7 +793,7 @@ function tradingView() {
   const priceChange = previousPrice ? ((activePrice - previousPrice) / previousPrice) * 100 : 0;
   return `
     <section class="page-heading">
-      <div><div class="eyebrow"><span class="status-dot"></span> ${isLive ? "LIVE MARKET · ADMIN MANAGED" : "DEMO MARKET · SEPARATE STREAM"}</div><h1>Trading terminal</h1><p>${isLive ? "Wallet-funded positions use the separate server-generated Live market managed by PIPMASTER." : "Explore a separate demo market stream using demo funds."}</p></div>
+      <div><div class="eyebrow"><span class="status-dot"></span> ${isLive ? "LIVE MARKET · PIPMASTER MANAGED" : "DEMO MARKET"}</div><h1>Trading terminal</h1><p>${isLive ? "Wallet positions use the Live market managed by PIPMASTER." : "Explore the Demo market using demo funds."}</p></div>
       <div class="mode-switch" role="group" aria-label="Account mode">
         <button class="${state.mode === "demo" ? "selected" : ""}" data-mode="demo">Demo</button>
         <button class="${state.mode === "live" ? "selected" : ""}" data-mode="live">Live</button>
@@ -808,14 +807,14 @@ function tradingView() {
     <div class="terminal-grid">
       <section class="panel chart-panel ${isLive ? "live-chart" : "demo-chart"}">
         <div class="panel-heading chart-heading">
-          <div class="asset-title"><div class="asset-icon">P</div><div><strong>${isLive ? "PIPMASTER Live Market" : "PIPMASTER Demo Market"}</strong><small>${isLive ? "Live wallet · independent stream" : "Demo funds · independent stream"}</small></div><span class="live-pill"><i></i> ${isLive ? "ADMIN MANAGED" : "DEMO MARKET"}</span></div>
+          <div class="asset-title"><div class="asset-icon">P</div><div><strong>${isLive ? "PIPMASTER Live Market" : "PIPMASTER Demo Market"}</strong><small>${isLive ? "Live wallet market" : "Demo funds market"}</small></div><span class="live-pill"><i></i> ${isLive ? "PIPMASTER MANAGED" : "DEMO MARKET"}</span></div>
           <div class="price-summary"><strong id="current-price">${activePrice.toFixed(2)}</strong><span class="${priceChange >= 0 ? "positive" : "negative"}" id="price-change">${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(2)}%</span></div>
         </div>
         <div class="chart-toolbar">
           <div class="chart-tabs"><button class="active">Chart</button><button data-view="history">${isLive ? "Live positions" : "Positions"} <span class="count">${activeTrades.filter((trade) => trade.status === "open").length}</span></button></div>
           <div class="timeframes">${["1m", "5m", "15m", "1h"].map((item, index) => `<button class="${index === 0 ? "active" : ""}" data-timeframe="${item}">${item}</button>`).join("")}<button class="chart-tool" title="Chart settings">⚑</button></div>
         </div>
-        <div class="chart-wrap"><canvas id="price-chart" aria-label="${isLive ? "Live" : "Demo"} PIPMASTER market chart"></canvas><div class="chart-overlay"><span>${isLive ? "LIVE WALLET MARKET · ADMIN MANAGED" : "SEPARATE DEMO MARKET"}</span><span id="chart-clock">00:00:00</span></div><div class="chart-watermark">PIP<span>MASTER</span></div></div>
+        <div class="chart-wrap"><canvas id="price-chart" aria-label="${isLive ? "Live" : "Demo"} PIPMASTER market chart"></canvas><div class="chart-overlay"><span>${isLive ? "LIVE MARKET · PIPMASTER MANAGED" : "DEMO MARKET"}</span><span id="chart-clock">00:00:00</span></div><div class="chart-watermark">PIP<span>MASTER</span></div></div>
         <div class="chart-legend"><span><i class="legend-line"></i> ${isLive ? "Live market price" : "Demo market price"}</span><span><i class="legend-dot"></i> ${isLive ? "Live market tick" : "Demo market tick"}</span><span class="chart-source">Server-generated · Supabase</span></div>
       </section>
 
@@ -858,13 +857,13 @@ function tradePanelView(availableBalance) {
   }
 
   const stake = Math.min(state.stake, availableBalance);
-  return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the separate admin-managed Live market." : "Test your strategy with demo funds on the separate Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
+  return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the PIPMASTER MANAGED Live market." : "Test your strategy with demo funds on the Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
     <div class="trade-field"><label>TRADE TYPE</label><div class="segmented" role="tablist"><button class="${state.tradeType === "digits" ? "selected" : ""}" data-trade-type="digits">Even / Odd</button><button class="${state.tradeType === "direction" ? "selected" : ""}" data-trade-type="direction">Over / Under</button></div></div>
     <div class="trade-field"><label>TRADE DURATION <span>Admin setting</span></label><div class="duration-select">${[10, 30, 60, 300].map((seconds) => `<button class="${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}</button>`).join("")}</div></div>
     <div class="trade-field"><label>STAKE <span>Available ${formatMoney(availableBalance)}</span></label><div class="stake-control"><button data-stake="-">−</button><div><span>$</span><input id="stake" inputmode="decimal" type="number" min="1" max="${availableBalance}" step="0.01" value="${stake}" aria-label="Trade stake"></div><button data-stake="+">+</button></div><div class="quick-stakes">${[1, 5, 10, 25].map((amount) => `<button data-quick-stake="${amount}">$${amount}</button>`).join("")}</div></div>
     <div class="payout-preview"><span>Potential return <small>incl. stake</small></span><strong id="potential-return">${formatMoney(stake * (1 + state.payout / 100))}</strong><span class="payout-rate">${state.payout}% payout</span></div>
     <div class="trade-actions"><button class="trade-button even" data-choice="${state.tradeType === "digits" ? "even" : "over"}"><span>${state.tradeType === "digits" ? "EVEN" : "OVER"}</span><small>${state.tradeType === "digits" ? "Last digit 0, 2, 4, 6, 8" : "Price finishes above entry"}</small><b>↗</b></button><button class="trade-button odd" data-choice="${state.tradeType === "digits" ? "odd" : "under"}"><span>${state.tradeType === "digits" ? "ODD" : "UNDER"}</span><small>${state.tradeType === "digits" ? "Last digit 1, 3, 5, 7, 9" : "Price finishes below entry"}</small><b>↘</b></button></div>
-    <div class="trade-footnote">${isLive ? `The ${formatMoney(stake)} stake is reserved from your wallet. Wins return the stake plus the displayed ${state.payout}% profit; losses forfeit the stake. Positions settle against the Live market shown above.` : "Demo outcomes use the separate demo market price when the timer expires."}</div>`;
+    <div class="trade-footnote">${isLive ? `The ${formatMoney(stake)} stake is reserved from your wallet. Wins return the stake plus the displayed ${state.payout}% profit; losses forfeit the stake. Positions settle against the Live market shown above.` : "Demo outcomes use the Demo market price when the timer expires."}</div>`;
 }
 
 function botCard(name, description, tier, icon, color) {
@@ -886,7 +885,7 @@ function historyView() {
 }
 
 function adminView() {
-  return `<section class="page-heading"><div><div class="eyebrow">SHARED MARKET · MANAGED BY PIPMASTER</div><h1>Admin controls</h1><p>The shared market shown in Live and Demo views is managed by PIPMASTER.</p></div><span class="preview-tag">MARKET SETTINGS</span></section>
+  return `<section class="page-heading"><div><div class="eyebrow">SHARED MARKET · PIPMASTER MANAGED</div><h1>Admin controls</h1><p>PIPMASTER manages settings for the Live and Demo markets.</p></div><span class="preview-tag">MARKET SETTINGS</span></section>
     <div class="admin-grid">
       <section class="panel settings-panel"><div class="panel-heading"><div><h2>Shared market</h2><p>Manage the internal PIPMASTER chart.</p></div><span class="setting-icon">⌁</span></div>
         ${rangeSetting("volatility", "Volatility", state.volatility, 0.1, 1, 0.01, `${Math.round(state.volatility * 100)}%`, "Changes the size of market price movements.")}
@@ -978,7 +977,7 @@ function simpleView(view) {
   if (view === "wallet") return walletView();
   const titles = { bots: ["Trading bot signals", "Explore indicator-based strategies for the shared PIPMASTER market."], profile: ["Profile", "Manage account information stored securely in Supabase."] };
   const [title, subtitle] = titles[view] || ["Page not found", "Choose a page from the navigation."];
-  return `<section class="page-heading"><div><div class="eyebrow">PIPMASTER</div><h1>${title}</h1><p>${subtitle}</p></div></section><div class="notice notice-warn"><span>ⓘ</span><div><strong>Signal-first trading</strong><p>Signals are indicator-based, not AI predictions or win probabilities. They do not execute automatically; review and confirm each position before using demo or wallet funds.</p></div></div><section class="bot-list">${strategyBots.map((bot) => `<button class="bot-market-card ${state.selectedBot === bot.name ? "selected" : ""}" data-bot="${escapeHtml(bot.name)}"><span class="bot-symbol" style="--bot-color:${bot.color}">${bot.icon}</span><span><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.type)} · ${escapeHtml(bot.description)}</small></span><span class="bot-tier">${escapeHtml(bot.tier)}</span><span class="bot-arrow">→</span></button>`).join("")}</section>${botSignal ? `<div class="bot-signal"><div><span class="eyebrow">${escapeHtml(botSignal.bot)} · ${state.mode === "live" ? "LIVE WALLET" : "DEMO"} SIGNAL</span><strong>${botSignal.choice.toUpperCase()} · ${botSignal.strength} signal strength</strong><small>Indicator signal only; not a win probability. Review before placing.</small></div><button class="subtle-button" data-action="use-signal">Use signal</button></div>` : ""}<button class="auth-primary compact bot-signal-action" type="button" data-action="run-bot">Generate ${escapeHtml(state.selectedBot)} signal</button>`;
+  return `<section class="page-heading"><div><div class="eyebrow">PIPMASTER</div><h1>${title}</h1><p>${subtitle}</p></div></section><section class="bot-list">${strategyBots.map((bot) => `<button class="bot-market-card ${state.selectedBot === bot.name ? "selected" : ""}" data-bot="${escapeHtml(bot.name)}"><span class="bot-symbol" style="--bot-color:${bot.color}">${bot.icon}</span><span><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.type)} · ${escapeHtml(bot.description)}</small></span><span class="bot-tier">${escapeHtml(bot.tier)}</span><span class="bot-arrow">→</span></button>`).join("")}</section>${botSignal ? `<div class="bot-signal"><div><span class="eyebrow">${escapeHtml(botSignal.bot)} · ${state.mode === "live" ? "LIVE WALLET" : "DEMO"} SIGNAL</span><strong>${botSignal.choice.toUpperCase()} · ${botSignal.strength} signal strength</strong><small>Indicator signal only; not a win probability. Review before placing.</small></div><button class="subtle-button" data-action="use-signal">Use signal</button></div>` : ""}<button class="auth-primary compact bot-signal-action" type="button" data-action="run-bot">Generate ${escapeHtml(state.selectedBot)} signal</button>`;
 }
 
 function walletView() {

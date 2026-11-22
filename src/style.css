@@ -196,6 +196,32 @@ button { cursor: pointer; }
   .wallet-review-actions > button { flex: 1; }
 }
 
+body { font-size: 16px; }
+.app-shell { font-size: 16px; }
+.app-shell p, .auth-screen p, .funds-terms p { font-size: 14px !important; line-height: 1.55; }
+.app-shell small, .auth-screen small { font-size: 13px !important; line-height: 1.45; }
+.app-shell h1, .auth-screen h1 { font-size: 30px; }
+.app-shell .panel-heading h2, .app-shell .profile-form-heading h2, .app-shell .security-section h2 { font-size: 18px !important; }
+.app-shell :where(.eyebrow, .side-label, .nav-tag, .market-status, .sidebar-foot, .breadcrumb, .account-chip, .balance-top, .chart-overlay, .chart-legend, .chart-source, .live-pill, .demo-label, .preview-tag, .trade-field > label, .status-badge, .wallet-status, .wallet-free-badge, .scan-badge, .bot-tier, .wallet-balance-top, .wallet-rate-hint, .wallet-payment-heading, .paybill-method-heading, .wallet-review-note, th) { font-size: 12px !important; }
+.app-shell :where(.nav-item, .admin-link, .mode-switch button, .chart-tabs button, .timeframes button, .segmented button, .duration-select button, .quick-stakes button, .trade-button, .subtle-button, .secondary-button, .text-button, .bot-card, .bot-market-card, .wallet-action-card, .auth-primary) { font-size: 14px !important; }
+.app-shell :where(.balance-card > strong, .wallet-balance-panel > strong, .price-summary strong, .payout-preview strong, .wallet-review-heading strong) { font-size: 20px !important; }
+.app-shell :where(.setting-label strong, .admin-stat strong, .strategy-row strong, .scanner-result strong, .bot-info strong, .wallet-action-card strong, .deposit-bank-details strong, .wallet-success-banner strong) { font-size: 14px !important; }
+.app-shell :where(.setting-label small, .setting-hint, .admin-helper p, .strategy-row small, .scanner-result p, .bot-info small, .bots-note, .trade-footnote, .wallet-table td small, .wallet-withdraw-preview small, .wallet-hours, .wallet-review-details, .wallet-review-heading time, .wallet-live-message p) { font-size: 13px !important; line-height: 1.5; }
+.app-shell input, .app-shell textarea, .auth-screen input { font-size: 16px !important; }
+.app-shell label, .auth-form > label, .profile-fields > label { font-size: 14px !important; }
+.app-shell td { font-size: 14px !important; }
+.app-shell .toast { font-size: 14px !important; }
+.auth-screen .auth-form > label, .auth-screen .auth-options, .auth-screen .remember-option, .auth-screen .auth-switch, .auth-screen .auth-link, .auth-screen .auth-primary, .auth-screen .auth-alert, .auth-screen .auth-security { font-size: 14px !important; }
+.auth-screen .auth-heading p { font-size: 15px !important; }
+
+@media (max-width: 540px) {
+  .app-shell h1, .auth-screen h1 { font-size: 27px; }
+  .app-shell .content { padding: 16px 12px 14px; }
+  .app-shell .mobile-nav .nav-item { font-size: 12px !important; }
+  .app-shell .panel-heading { gap: 8px; }
+  .app-shell .asset-title { flex-wrap: wrap; }
+}
+
 /* Readable auth and admin layouts across desktop and mobile. */
 .auth-screen { min-height: 100vh; min-height: 100dvh; }
 .auth-card { width: min(calc(100% - 32px), 470px); }
