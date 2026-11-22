@@ -1015,7 +1015,9 @@ function adminTransactionsPanel() {
       <button class="secondary-button" type="button" data-action="transactions-prev" ${adminTransactionOffset <= 0 || adminTransactionLoading ? "disabled" : ""}>Previous</button>
       <button class="secondary-button" type="button" data-action="transactions-next" ${pageEnd >= adminTransactionTotal || adminTransactionLoading ? "disabled" : ""}>Next</button>
     </div>
-    ${adminTransactionLoading ? `<div class="empty-state">Loading transaction history…</div>` : adminTransactionRows.length ? `<div class="table-scroll"><table class="admin-table"><thead><tr><th>DATE</th><th>USER</th><th>TYPE</th><th>AMOUNT / PAYOUT</th><th>STATUS</th><th>REFERENCE / NOTE</th></tr></thead><tbody>${adminTransactionRows.map((row) => `<tr><td>${new Date(Number(row.time)).toLocaleString()}</td><td><strong>${escapeHtml(row.fullName || row.email || "User")}</strong><small>${escapeHtml(row.email || "")}</small></td><td>${escapeHtml(row.type)}</td><td>${formatMoney(row.amount)}${row.type === "withdrawal" ? `<small>Fee ${formatMoney(row.fee)} · payout ${formatMoney(row.payout)}</small>` : ""}</td><td><span class="wallet-status ${escapeHtml(row.status)}">${escapeHtml((row.status || "").replaceAll("_", " "))}</span></td><td>${escapeHtml(row.reference || row.note || row.destination?.accountNumber || "—")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>No matching wallet requests</strong><p>Choose another status or transaction type.</p></div>`}
+    ${adminTransactionLoading ? `<div class="empty-state">Loading transaction history…</div>` : adminTransactionRows.length ? `<div class="table-scroll"><table class="admin-table"><thead><tr><th>DATE</th><th>USER</th><th>TYPE</th><th>AMOUNT / PAYOUT</th><th>STATUS</th><th>REFERENCE / NOTE</th></tr></thead><tbody>${adminTransactionRows.map((row) => `<tr><td>${new Date(Number(row.time)).toLocaleString()}</td><td><strong>${escapeHtml(row.fullName || row.email || "User")}</strong><small>${escapeHtml(row.email || "")}</small></td><td>${escapeHtml(row.type)}</td><td>${formatMoney(row.amount)}${row.type === "withdrawal" ? `<small>Fee ${formatMoney(row.fee)} · payout ${formatMoney(row.payout)}</small>` : ""}</td><td>${row.type === "deposit" && row.status === "pending"
+      ? `<button class="wallet-status pending wallet-status-action" type="button" data-action="review-wallet" data-id="${escapeHtml(row.id)}" data-approve="true" aria-label="Confirm deposit and credit ${escapeHtml(row.email || "user")}" title="Verify the payment, then confirm to credit the user's wallet"><span>pending</span><small>Confirm deposit</small></button>`
+      : `<span class="wallet-status ${escapeHtml(row.status)}">${escapeHtml((row.status || "").replaceAll("_", " "))}</span>`}</td><td>${escapeHtml(row.reference || row.note || row.destination?.accountNumber || "—")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty-state"><strong>No matching wallet requests</strong><p>Choose another status or transaction type.</p></div>`}
   </section>`;
 }
 
@@ -1794,15 +1796,21 @@ async function markAllNotificationsRead() {
 async function reviewWalletRequest(event) {
   const button = event.currentTarget;
   const approve = button.dataset.approve === "true";
-  const request = (walletAdminData?.requests || []).find((item) => item.id === button.dataset.id);
+  const request = (walletAdminData?.requests || []).find((item) => item.id === button.dataset.id)
+    || adminTransactionRows.find((item) => item.id === button.dataset.id);
   if (!request) {
     showToast("This wallet request is no longer available. Refresh the request list.");
+    return;
+  }
+  if (request.status && request.status !== "pending") {
+    showToast("This request is no longer pending. Refresh the dashboard.");
     return;
   }
   const action = approve
     ? request.type === "deposit" ? "confirm this deposit after verifying the bank or Paybill payment" : "confirm this withdrawal after sending the bank payout"
     : "reject this wallet request";
   if (!window.confirm(`Are you sure you want to ${action}?`)) return;
+  button.disabled = true;
 
   const note = Array.from(app.querySelectorAll("[data-wallet-review-note]"))
     .find((field) => field.dataset.walletReviewNote === button.dataset.id)?.value || "";
@@ -1814,17 +1822,27 @@ async function reviewWalletRequest(event) {
     });
     if (error) throw error;
   } catch (error) {
+    if (button.isConnected) button.disabled = false;
     showToast(`Could not review wallet request: ${error.message}`);
     return;
   }
-  try {
-    await refreshWalletSnapshot();
-  } catch (refreshError) {
-    showToast(`Request updated, but wallet refresh failed: ${refreshError.message}`);
+  let refreshError = null;
+  if (request.userId === auth.user?.id) {
+    try {
+      await refreshWalletSnapshot();
+    } catch (error) {
+      refreshError = error;
+    }
   }
   walletAdminLoaded = false;
   await loadWalletAdminData();
-  showToast(approve ? "Wallet request confirmed." : "Wallet request rejected.");
+  if (request.type === "deposit" && approve) {
+    showToast(refreshError
+      ? `Deposit completed and the user's wallet was credited. Admin wallet refresh failed: ${refreshError.message}`
+      : "Deposit completed successfully. The user's wallet was credited and they were notified.");
+  } else {
+    showToast(approve ? "Wallet request confirmed." : "Wallet request rejected.");
+  }
 }
 
 function setStake(value) {

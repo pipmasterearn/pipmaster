@@ -259,6 +259,10 @@ button { cursor: pointer; }
 .admin-announcement-form { display: grid; grid-template-columns: 1fr 2fr auto; align-items: end; gap: 10px; padding: 0 16px; }
 .admin-announcement-form textarea { min-height: 40px; resize: vertical; }
 .table-action.danger { margin-left: 8px; color: #f28a8d; }
+.wallet-status-action { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 3px; border: 1px solid rgba(243,198,94,.35); cursor: pointer; font: inherit; text-align: left; }
+.wallet-status-action small { color: #ffe4a3; font-size: 11px; }
+.wallet-status-action:hover { border-color: rgba(243,198,94,.75); background: rgba(243,198,94,.14); }
+.wallet-status-action:disabled { cursor: wait; opacity: .65; }
 
 @media (max-width: 900px) {
   .admin-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
