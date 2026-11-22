@@ -668,7 +668,7 @@ function tradingView() {
       </div>
     </section>
     <section class="balance-row">
-      <div class="balance-card ${state.mode === "demo" ? "primary-balance" : ""}"><div class="balance-top"><span>DEMO BALANCE</span><span class="balance-icon">◈</span></div><strong>${formatMoney(state.demoBalance)}</strong><small><span class="positive">↗ Demo funds</span> · Stored remotely</small></div>
+      <div class="balance-card ${state.mode === "demo" ? "primary-balance" : ""}"><div class="balance-top"><span>DEMO BALANCE</span><span class="balance-icon">◈</span></div><strong>${formatMoney(state.demoBalance)}</strong><small><span class="positive">↗ Demo funds</span> · Auto-restores at $0 after settlement</small></div>
       <div class="balance-card ${state.mode === "live" ? "primary-balance" : ""}"><div class="balance-top"><span>LIVE WALLET</span><span class="balance-icon muted">▤</span></div><strong>${formatMoney(state.liveBalance)}</strong><small>${formatKes(state.liveBalance, walletRate)} · Available balance</small></div>
       <button class="balance-card add-funds" data-view="wallet"><span class="plus">+</span><span><strong>Open wallet</strong><small>Deposit or withdraw funds</small></span><span class="arrow">↗</span></button>
     </section>
