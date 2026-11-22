@@ -42,6 +42,16 @@ const auth = {
 
 const state = { ...initialState };
 const app = document.querySelector("#app");
+
+app?.addEventListener("click", (event) => {
+  const setupButton = event.target.closest('[data-action="admin-create"]');
+  if (!setupButton) return;
+  auth.screen = "admin-create";
+  auth.message = "";
+  auth.messageType = "info";
+  render();
+});
+
 const formatMoney = (value) => `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const formatKes = (value, rate = 128) => `KSh ${(Number(value) * Number(rate)).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -237,7 +247,7 @@ function renderAuth() {
     ${auth.message ? `<div class="auth-alert ${auth.messageType}">${escapeHtml(auth.message)}</div>` : ""}
     ${auth.profileError ? `<div class="auth-alert error">${escapeHtml(auth.profileError)}</div>` : ""}
     ${form}
-    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>${auth.adminConfigured !== true ? ` · <button class="auth-link" data-action="admin-create">Create admin account</button>` : ""}` : ""}</div>` : ""}
+    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>${auth.adminConfigured !== true ? `<button class="auth-setup-button" type="button" data-action="admin-create">Create one-time admin account</button>` : ""}` : ""}</div>` : ""}
     <button class="auth-link centered funds-terms-link" data-action="show-funds-terms">Wallet funds terms</button>
     <div class="auth-security"><span>⌑</span> Passwords are handled by Supabase Auth and are never stored in this site’s source code.</div>
   </section></main>`;
