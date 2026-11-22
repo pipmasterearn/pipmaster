@@ -113,7 +113,7 @@ function render() {
           ${navItem("wallet", "▣", "Wallet")}
         </nav>
         <div class="toast" id="toast" role="status"></div>
-        <footer class="disclaimer"><span>ⓘ</span> Live view shows the shared admin-managed PIPMASTER market. Wallet funds are separate from demo positions; KSh values are estimates.</footer>
+        <footer class="disclaimer"><span>ⓘ</span> Live view shows the shared PIPMASTER market managed by PIPMASTER. Wallet funds are separate from demo positions; KSh values are estimates.</footer>
       </main>
     </div>`;
   bindEvents();
@@ -640,7 +640,7 @@ function tradingView() {
   const active = state.mode === "demo" ? state.demoBalance : state.liveBalance;
   return `
     <section class="page-heading">
-      <div><div class="eyebrow"><span class="status-dot"></span> SHARED PIPMASTER MARKET · ADMIN-MANAGED</div><h1>Trading terminal</h1><p>${state.mode === "live" ? "Live view of the shared market managed from Admin controls." : "Explore the shared PIPMASTER market using demo funds."}</p></div>
+      <div><div class="eyebrow"><span class="status-dot"></span> SHARED MARKET · MANAGED BY PIPMASTER</div><h1>Trading terminal</h1><p>${state.mode === "live" ? "Live view of the shared market managed by PIPMASTER." : "Explore the shared PIPMASTER market using demo funds."}</p></div>
       <div class="mode-switch" role="group" aria-label="Account mode">
         <button class="${state.mode === "demo" ? "selected" : ""}" data-mode="demo">Demo</button>
         <button class="${state.mode === "live" ? "selected" : ""}" data-mode="live">Live</button>
@@ -654,14 +654,14 @@ function tradingView() {
     <div class="terminal-grid">
       <section class="panel chart-panel">
         <div class="panel-heading chart-heading">
-          <div class="asset-title"><div class="asset-icon">P</div><div><strong>PIPMASTER Market</strong><small>Shared · 1 tick</small></div><span class="live-pill"><i></i> ADMIN-MANAGED</span></div>
+          <div class="asset-title"><div class="asset-icon">P</div><div><strong>PIPMASTER Market</strong><small>Shared · 1 tick</small></div><span class="live-pill"><i></i> MANAGED BY PIPMASTER</span></div>
           <div class="price-summary"><strong id="current-price">${price.toFixed(2)}</strong><span class="positive" id="price-change">+0.38%</span></div>
         </div>
         <div class="chart-toolbar">
           <div class="chart-tabs"><button class="active">Chart</button><button data-view="history">${state.mode === "live" ? "Demo positions" : "Positions"} <span class="count">${state.trades.filter((trade) => trade.status === "open").length}</span></button></div>
           <div class="timeframes">${["1m", "5m", "15m", "1h"].map((item, index) => `<button class="${index === 0 ? "active" : ""}" data-timeframe="${item}">${item}</button>`).join("")}<button class="chart-tool" title="Chart settings">⚑</button></div>
         </div>
-        <div class="chart-wrap"><canvas id="price-chart" aria-label="Shared admin-managed PIPMASTER market chart"></canvas><div class="chart-overlay"><span>PIPMASTER INTERNAL MARKET</span><span id="chart-clock">00:00:00</span></div><div class="chart-watermark">PIP<span>MASTER</span></div></div>
+        <div class="chart-wrap"><canvas id="price-chart" aria-label="Shared PIPMASTER market chart"></canvas><div class="chart-overlay"><span>PIPMASTER INTERNAL MARKET</span><span id="chart-clock">00:00:00</span></div><div class="chart-watermark">PIP<span>MASTER</span></div></div>
         <div class="chart-legend"><span><i class="legend-line"></i> Price</span><span><i class="legend-dot"></i> Shared market tick</span><span class="chart-source">Server-generated · Supabase</span></div>
       </section>
 
@@ -672,7 +672,7 @@ function tradingView() {
         <div class="trade-field"><label>STAKE <span>Available ${formatMoney(active)}</span></label><div class="stake-control"><button data-stake="-">−</button><div><span>$</span><input id="stake" inputmode="decimal" type="number" min="1" max="${active}" value="${state.stake}" aria-label="Trade stake"></div><button data-stake="+">+</button></div><div class="quick-stakes">${[10, 25, 50, 100].map((amount) => `<button data-quick-stake="${amount}">$${amount}</button>`).join("")}</div></div>
         <div class="payout-preview"><span>Potential return <small>incl. stake</small></span><strong id="potential-return">${formatMoney(state.stake * (1 + state.payout / 100))}</strong><span class="payout-rate">${state.payout}% payout</span></div>
         <div class="trade-actions"><button class="trade-button even" data-choice="${state.tradeType === "digits" ? "even" : "over"}"><span>${state.tradeType === "digits" ? "EVEN" : "OVER"}</span><small>${state.tradeType === "digits" ? "Last digit 0, 2, 4, 6, 8" : "Price finishes above entry"}</small><b>↗</b></button><button class="trade-button odd" data-choice="${state.tradeType === "digits" ? "odd" : "under"}"><span>${state.tradeType === "digits" ? "ODD" : "UNDER"}</span><small>${state.tradeType === "digits" ? "Last digit 1, 3, 5, 7, 9" : "Price finishes below entry"}</small><b>↘</b></button></div>
-        <div class="trade-footnote">Demo outcomes use the shared market price when the timer expires.</div>` : `<div class="wallet-live-message"><span class="balance-icon">◈</span><h2>Live market view</h2><p>This shared PIPMASTER market is managed in Admin controls. Demo positions use demo funds; wallet funds remain separate and can be managed in Wallet.</p><button class="auth-primary compact" type="button" data-view="wallet">Open wallet</button></div>`}
+        <div class="trade-footnote">Demo outcomes use the shared market price when the timer expires.</div>` : `<div class="wallet-live-message"><span class="balance-icon">◈</span><h2>Live market view</h2><p>This shared market is managed by PIPMASTER. Demo positions use demo funds; wallet funds remain separate and can be managed in Wallet.</p><button class="auth-primary compact" type="button" data-view="wallet">Open wallet</button></div>`}
       </section>
     </div>
 
@@ -713,7 +713,7 @@ function historyView() {
 }
 
 function adminView() {
-  return `<section class="page-heading"><div><div class="eyebrow">SHARED PIPMASTER MARKET · ADMIN-CONTROLLED</div><h1>Admin controls</h1><p>These settings control the shared market shown in Live and Demo views.</p></div><span class="preview-tag">MARKET SETTINGS</span></section>
+  return `<section class="page-heading"><div><div class="eyebrow">SHARED MARKET · MANAGED BY PIPMASTER</div><h1>Admin controls</h1><p>The shared market shown in Live and Demo views is managed by PIPMASTER.</p></div><span class="preview-tag">MARKET SETTINGS</span></section>
     <div class="admin-grid">
       <section class="panel settings-panel"><div class="panel-heading"><div><h2>Shared market</h2><p>Manage the internal PIPMASTER chart.</p></div><span class="setting-icon">⌁</span></div>
         ${rangeSetting("volatility", "Volatility", state.volatility, 0.1, 1, 0.01, `${Math.round(state.volatility * 100)}%`, "Changes the size of market price movements.")}
@@ -978,7 +978,7 @@ function bindEvents() {
   app.querySelector('[data-action="use-signal"]')?.addEventListener("click", async () => {
     if (!botSignal) return;
     if (state.mode !== "demo") {
-      showToast("Switch to Demo to use a strategy signal. Live view shows the shared admin-managed market.");
+      showToast("Switch to Demo to use a strategy signal. Live view shows the market managed by PIPMASTER.");
       return;
     }
     state.tradeType = "direction";
@@ -1222,7 +1222,7 @@ async function resetDemo() {
 
 async function placeTrade(choice) {
   if (state.mode !== "demo") {
-    showToast("Switch to Demo to place a demo position. Live view shows the shared admin-managed market.");
+    showToast("Switch to Demo to place a demo position. Live view shows the market managed by PIPMASTER.");
     return;
   }
   const stake = Number(app.querySelector("#stake")?.value);
