@@ -175,7 +175,7 @@ function renderAuth() {
 
   let form = "";
   if (configMissing) {
-    form = `<div class="auth-alert error"><strong>Supabase setup is required</strong><p>Authentication and remote app data are intentionally fail-closed. Configure the GitHub Actions variables <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>, then apply all four Supabase migrations before sign-up can work.</p></div>`;
+    form = `<div class="auth-alert error"><strong>Supabase setup is required</strong><p>Authentication and remote app data are intentionally fail-closed. Configure the GitHub Actions variables <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>, then apply all five Supabase migrations before sign-up can work.</p></div>`;
   } else if (denied) {
     form = `<div class="auth-alert error"><strong>This account is not an administrator.</strong><p>Admin access is granted from the protected database, not by choosing an email address on this screen.</p></div><div class="auth-actions"><button class="auth-primary" data-action="admin-retry">Try admin sign in</button><button class="auth-link" data-action="leave-admin">Return to trading</button></div>`;
   } else if (login) {
@@ -740,13 +740,13 @@ function walletAdminPanel() {
     <form class="wallet-admin-form" data-form="wallet-settings">
       <div class="profile-form-heading"><h2>Deposit payment details</h2><p>These details are shown after a user starts a deposit. Changes apply to new requests; existing requests keep their saved instructions. Never enter a bank password, PIN, or one-time security code here.</p></div>
       <div class="profile-fields">
-        <label>Bank name<input name="bank_name" value="${escapeHtml(settings.bankName || "")}" maxlength="120" required></label>
-        <label>Account name<input name="account_name" value="${escapeHtml(settings.accountName || "")}" maxlength="120" required></label>
-        <label>Account number<input name="account_number" value="${escapeHtml(settings.accountNumber || "")}" maxlength="120" required></label>
+        <label>Bank name (optional)<input name="bank_name" value="${escapeHtml(settings.bankName || "")}" maxlength="120"></label>
+        <label>Account name (optional)<input name="account_name" value="${escapeHtml(settings.accountName || "")}" maxlength="120"></label>
+        <label>Account number (optional)<input name="account_number" value="${escapeHtml(settings.accountNumber || "")}" maxlength="120"></label>
         <label>Branch (optional)<input name="branch_name" value="${escapeHtml(settings.branchName || "")}" maxlength="120"></label>
         <label>SWIFT/BIC (optional)<input name="swift_code" value="${escapeHtml(settings.swiftCode || "")}" maxlength="32"></label>
         <label>USD to KSh rate<input name="usd_to_kes" type="number" min="1" max="100000" step="0.0001" value="${escapeHtml(settings.usdToKes ?? 128)}" required></label>
-        <label class="wallet-instructions-field">Deposit instructions<textarea name="deposit_instructions" rows="4" maxlength="2000" required>${escapeHtml(settings.depositInstructions || "")}</textarea></label>
+        <label class="wallet-instructions-field">Bank transfer instructions (optional)<textarea name="deposit_instructions" rows="4" maxlength="2000">${escapeHtml(settings.depositInstructions || "")}</textarea></label>
         <div class="wallet-paybill-heading"><h2>M-PESA Paybill</h2><p>Paybill deposits are free of PIPMASTER fees.</p></div>
         <label>Paybill number<input name="paybill_number" value="${escapeHtml(settings.paybillNumber || "522533")}" maxlength="120" required></label>
         <label>Paybill account number<input name="paybill_account_number" value="${escapeHtml(settings.paybillAccountNumber || "8126239")}" maxlength="120" required></label>
@@ -816,7 +816,7 @@ function walletView() {
   if (walletScreen === "deposit" || walletScreen === "withdraw") {
     const isDeposit = walletScreen === "deposit";
     return `${pageHeading}<section class="panel wallet-form-panel">
-      <div class="panel-heading"><div><h2>${isDeposit ? "Start a deposit" : "Request a withdrawal"}</h2><p>${isDeposit ? "Enter the amount to view secure bank transfer instructions." : "Choose the amount and bank account for your payout."}</p></div></div>
+      <div class="panel-heading"><div><h2>${isDeposit ? "Start a deposit" : "Request a withdrawal"}</h2><p>${isDeposit ? "Enter the amount to view bank or M-PESA Paybill instructions." : "Choose the amount and bank account for your payout."}</p></div></div>
       <div class="wallet-policy-strip">${isDeposit ? "Minimum $2 · Maximum $7,692" : "Minimum $5 · 7.68% fee · Up to 5 business days after approval"}</div>
       <form class="wallet-form" data-form="${isDeposit ? "wallet-deposit-request" : "wallet-withdrawal"}">
         <label>Amount (USD)<span class="wallet-rate-hint">≈ ${formatKes(1, walletRate)} per $1</span><input name="amount_usd" type="number" min="${isDeposit ? 2 : 5}" ${isDeposit ? 'max="7692"' : `max="${state.liveBalance}"`} step="0.01" required></label>
@@ -832,26 +832,30 @@ function walletView() {
   }
   if (walletScreen === "deposit-instructions" && currentDeposit) {
     const details = currentDeposit.instructions || {};
+    const hasBankTransfer = [details.bankName, details.accountName, details.accountNumber, details.instructions]
+      .every((value) => String(value || "").trim());
+    const hasPaybill = [details.paybillNumber, details.paybillAccountNumber, details.paybillAccountName]
+      .every((value) => String(value || "").trim());
     return `${pageHeading}<section class="panel wallet-form-panel">
-      <div class="wallet-success-banner"><strong>Deposit request created</strong><span>Choose either bank transfer or M-PESA Paybill below, then submit the payment reference for confirmation.</span></div>
+      <div class="wallet-success-banner"><strong>Deposit request created</strong><span>Use a payment option shown below, then submit the payment reference for confirmation.</span></div>
       <div class="deposit-bank-details">
-        <div class="wallet-payment-heading">Bank transfer</div>
-        <div><span>Bank</span><strong>${escapeHtml(details.bankName || "")}</strong></div>
-        <div><span>Account name</span><strong>${escapeHtml(details.accountName || "")}</strong></div>
-        <div><span>Account number</span><strong>${escapeHtml(details.accountNumber || "")}</strong></div>
+        ${hasBankTransfer ? `<div class="wallet-payment-heading">Bank transfer</div>
+        <div><span>Bank</span><strong>${escapeHtml(details.bankName)}</strong></div>
+        <div><span>Account name</span><strong>${escapeHtml(details.accountName)}</strong></div>
+        <div><span>Account number</span><strong>${escapeHtml(details.accountNumber)}</strong></div>
         ${details.branchName ? `<div><span>Branch</span><strong>${escapeHtml(details.branchName)}</strong></div>` : ""}
         ${details.swiftCode ? `<div><span>SWIFT/BIC</span><strong>${escapeHtml(details.swiftCode)}</strong></div>` : ""}
-        <div class="deposit-instructions-copy"><span>Payment instructions</span><p>${escapeHtml(details.instructions || "")}</p></div>
-        <div class="paybill-payment-method">
+        <div class="deposit-instructions-copy"><span>Payment instructions</span><p>${escapeHtml(details.instructions)}</p></div>` : ""}
+        ${hasPaybill ? `<div class="paybill-payment-method">
           <div class="paybill-method-heading"><strong>M-PESA Paybill</strong><span class="wallet-free-badge">FREE</span></div>
           <div class="paybill-method-details">
-            <div><span>Paybill number</span><strong>${escapeHtml(details.paybillNumber || "522533")}</strong></div>
-            <div><span>Account number</span><strong>${escapeHtml(details.paybillAccountNumber || "8126239")}</strong></div>
-            <div><span>Account name</span><strong>${escapeHtml(details.paybillAccountName || "PIPMASTER")}</strong></div>
+            <div><span>Paybill number</span><strong>${escapeHtml(details.paybillNumber)}</strong></div>
+            <div><span>Account number</span><strong>${escapeHtml(details.paybillAccountNumber)}</strong></div>
+            <div><span>Account name</span><strong>${escapeHtml(details.paybillAccountName)}</strong></div>
           </div>
           <p>On your phone, open M-PESA and choose <strong>Lipa na M-PESA → Pay Bill</strong>. Enter the Paybill and account numbers above, enter the requested deposit amount, and complete payment. Copy the transaction code from the M-PESA confirmation message.</p>
           <small>PIPMASTER does not charge a fee for Paybill deposits. Your provider may have separate charges.</small>
-        </div>
+        </div>` : ""}
         <small>USD/KSh display rate at request time: $1 = ${Number(details.usdToKes || walletRate).toLocaleString("en-KE")} KSh.</small>
       </div>
       <form class="wallet-form" data-form="wallet-deposit-reference">
