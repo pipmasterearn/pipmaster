@@ -237,7 +237,7 @@ function renderAuth() {
     ${auth.message ? `<div class="auth-alert ${auth.messageType}">${escapeHtml(auth.message)}</div>` : ""}
     ${auth.profileError ? `<div class="auth-alert error">${escapeHtml(auth.profileError)}</div>` : ""}
     ${form}
-    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>` : ""}</div>` : ""}
+    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>${auth.adminConfigured !== true ? ` · <button class="auth-link" data-action="admin-create">Create admin account</button>` : ""}` : ""}</div>` : ""}
     <button class="auth-link centered funds-terms-link" data-action="show-funds-terms">Wallet funds terms</button>
     <div class="auth-security"><span>⌑</span> Passwords are handled by Supabase Auth and are never stored in this site’s source code.</div>
   </section></main>`;
@@ -464,7 +464,13 @@ function bindAuthEvents() {
       render();
       return;
     }
-    auth.screen = auth.adminConfigured === false ? "admin-create" : "admin-login";
+    auth.screen = auth.adminConfigured !== true ? "admin-create" : "admin-login";
+    render();
+  }));
+  app.querySelectorAll('[data-action="admin-create"]').forEach((button) => button.addEventListener("click", () => {
+    auth.screen = "admin-create";
+    auth.message = "";
+    auth.messageType = "info";
     render();
   }));
   app.querySelectorAll('[data-action="leave-admin"]').forEach((button) => button.addEventListener("click", () => {
