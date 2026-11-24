@@ -61,6 +61,8 @@ let price = 3842.61;
 let chartPoints = [];
 let livePrice = 3842.61;
 let liveChartPoints = [];
+let chartTimeframe = "1m";
+let chartPointer = null;
 let chartTimer;
 let toastTimer;
 let botSignal = null;
@@ -169,6 +171,7 @@ function render() {
   if (state.activeView === "trade") {
     const canvas = document.querySelector("#price-chart");
     drawChart(canvas);
+    bindChartInteractions(canvas);
   }
   syncNotificationBadge();
 }
@@ -334,7 +337,8 @@ async function refreshTerminalSnapshot(renderOnChange = false) {
   }
   state.trades = Array.isArray(data.trades) ? data.trades : [];
   chartPoints = (Array.isArray(data.ticks) ? data.ticks : [])
-    .map((tick, index) => ({ x: index, y: Number(tick.price) }));
+    .map((tick, index) => ({ x: index, y: Number(tick.price), time: tickTimestamp(tick) }))
+    .filter((point) => Number.isFinite(point.y));
 
   const settingsChanged = !pendingLocalSettings
     && previousSettings !== JSON.stringify([state.volatility, state.drift, state.chartSpeed, state.payout]);
@@ -363,7 +367,8 @@ async function refreshLiveMarketSnapshot() {
 
   livePrice = Number(data.price);
   liveChartPoints = (Array.isArray(data.ticks) ? data.ticks : [])
-    .map((tick, index) => ({ x: index, y: Number(tick.price) }));
+    .map((tick, index) => ({ x: index, y: Number(tick.price), time: tickTimestamp(tick) }))
+    .filter((point) => Number.isFinite(point.y));
 
   if (state.mode === "live") {
     const priceEl = document.querySelector("#current-price");
@@ -422,11 +427,12 @@ async function initializeWorkspace(user) {
   workspaceUserId = user.id;
   workspaceLoadPromise = (async () => {
     try {
-      await loadProfile(user);
-      await loadStrategyCatalog();
-      await refreshTerminalSnapshot();
-      await refreshWalletSnapshot();
-      await loadNotifications();
+      await Promise.all([
+        loadProfile(user),
+        loadStrategyCatalog(),
+        refreshTerminalSnapshot(),
+        refreshWalletSnapshot(),
+      ]);
       if (window.location.hash === "#/admin/setup") {
         await checkAdminConfigured();
         auth.screen = auth.profile?.role === "admin" || auth.adminConfigured === true
@@ -436,6 +442,7 @@ async function initializeWorkspace(user) {
         auth.screen = window.location.hash.includes("type=recovery") ? "reset-password" : "workspace";
       }
       startChart();
+      void loadNotifications();
     } catch (error) {
       workspaceUserId = null;
       throw error;
@@ -490,21 +497,21 @@ async function beginAuth() {
       : window.location.hash === "#/admin/setup"
         ? "admin-create"
         : "login";
+  render();
   if (!supabaseConfigured) {
     auth.ready = true;
     render();
     return;
   }
   try {
-    await checkAdminConfigured();
-    if (auth.screen === "admin-create" && auth.adminConfigured === true) {
-      auth.screen = "admin-login";
-    }
     const { data, error } = await supabase.auth.getSession();
     if (error) throw error;
     auth.user = data.session?.user || null;
     if (auth.user) {
       await initializeWorkspace(auth.user);
+    } else if (auth.screen === "admin-create") {
+      await checkAdminConfigured();
+      if (auth.adminConfigured === true) auth.screen = "admin-login";
     }
   } catch (error) {
     auth.message = `Could not restore your sign-in session: ${error.message}`;
@@ -863,7 +870,7 @@ function tradingView() {
   const priceChange = previousPrice ? ((activePrice - previousPrice) / previousPrice) * 100 : 0;
   return `
     <section class="page-heading">
-      <div><div class="eyebrow"><span class="status-dot"></span> ${isLive ? "LIVE MARKET · PIPMASTER MANAGED" : "DEMO MARKET"}</div><h1>Trading terminal</h1><p>${isLive ? "Wallet positions use the Live market managed by PIPMASTER." : "Explore the Demo market using demo funds."}</p></div>
+      <div><div class="eyebrow"><span class="status-dot"></span> ${isLive ? "LIVE MARKET" : "DEMO MARKET"}</div><h1>Trading terminal</h1><p>${isLive ? "Wallet positions use the Live market." : "Explore the Demo market using demo funds."}</p></div>
       <div class="mode-switch" role="group" aria-label="Account mode">
         <button class="${state.mode === "demo" ? "selected" : ""}" data-mode="demo">Demo</button>
         <button class="${state.mode === "live" ? "selected" : ""}" data-mode="live">Live</button>
@@ -877,15 +884,15 @@ function tradingView() {
     <div class="terminal-grid">
       <section class="panel chart-panel ${isLive ? "live-chart" : "demo-chart"}">
         <div class="panel-heading chart-heading">
-          <div class="asset-title"><div class="asset-icon">P</div><div><strong>${isLive ? "PIPMASTER Live Market" : "PIPMASTER Demo Market"}</strong><small>${isLive ? "Live wallet market" : "Demo funds market"}</small></div><span class="live-pill"><i></i> ${isLive ? "PIPMASTER MANAGED" : "DEMO MARKET"}</span></div>
-          <div class="price-summary"><strong id="current-price">${activePrice.toFixed(2)}</strong><span class="${priceChange >= 0 ? "positive" : "negative"}" id="price-change">${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(2)}%</span></div>
+          <div class="asset-title"><div class="asset-icon">P</div><div><strong>${isLive ? "PIPMASTER Live Market" : "PIPMASTER Demo Market"}</strong><small>${isLive ? "Live wallet market" : "Demo funds market"}</small></div><span class="live-pill"><i></i> ${isLive ? "LIVE MARKET" : "DEMO MARKET"}</span></div>
+          <div class="price-summary"><div class="price-value"><strong id="current-price">${activePrice.toFixed(2)}</strong><small>USD</small></div><span class="${priceChange >= 0 ? "positive" : "negative"}" id="price-change">${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(2)}%</span></div>
         </div>
         <div class="chart-toolbar">
           <div class="chart-tabs"><button class="active">Chart</button><button data-view="history">${isLive ? "Live positions" : "Positions"} <span class="count">${activeTrades.filter((trade) => trade.status === "open").length}</span></button></div>
-          <div class="timeframes">${["1m", "5m", "15m", "1h"].map((item, index) => `<button class="${index === 0 ? "active" : ""}" data-timeframe="${item}">${item}</button>`).join("")}<button class="chart-tool" title="Chart settings">⚑</button></div>
+          <div class="timeframes"><span class="chart-type-label">Candles</span>${["1m", "5m", "15m", "1h"].map((item) => `<button class="${item === chartTimeframe ? "active" : ""}" data-timeframe="${item}">${item}</button>`).join("")}</div>
         </div>
-        <div class="chart-wrap"><canvas id="price-chart" aria-label="${isLive ? "Live" : "Demo"} PIPMASTER market chart"></canvas><div class="chart-overlay"><span>${isLive ? "LIVE MARKET · PIPMASTER MANAGED" : "DEMO MARKET"}</span><span id="chart-clock">00:00:00</span></div><div class="chart-watermark">PIP<span>MASTER</span></div></div>
-        <div class="chart-legend"><span><i class="legend-line"></i> ${isLive ? "Live market price" : "Demo market price"}</span><span><i class="legend-dot"></i> ${isLive ? "Live market tick" : "Demo market tick"}</span><span class="chart-source">Server-generated · Supabase</span></div>
+        <div class="chart-wrap"><canvas id="price-chart" role="img" aria-label="${isLive ? "Live" : "Demo"} PIPMASTER candlestick chart with price and time scales"></canvas></div>
+        <div class="chart-legend"><span><b>O</b><strong id="chart-open">—</strong><b>H</b><strong id="chart-high">—</strong><b>L</b><strong id="chart-low">—</strong><b>C</b><strong id="chart-close">—</strong></span><span class="chart-source">PIPMASTER market · <span id="chart-clock">--:--:--</span></span></div>
       </section>
 
       <section class="panel trade-panel">${tradePanelView(active)}</section>
@@ -894,7 +901,7 @@ function tradingView() {
     <section class="lower-grid">
       <section class="panel scanner-panel">
         <div class="panel-heading"><div class="scanner-title"><div class="scanner-icon">✳</div><div><h2>AI Market Scanner</h2><p>Indicator analysis of shared PIPMASTER market history</p></div></div><button class="subtle-button" data-action="scan">Run scan <span>↗</span></button></div>
-        <div class="scanner-result" id="scanner-result"><div class="scan-meter"><div class="meter-ring">—</div></div><div><span class="eyebrow">INDICATOR-BASED · NOT AI PREDICTIONS</span><strong>Scanner ready</strong><p>Analyze recent shared price movement to see an indicator summary, not a win probability.</p></div><span class="scan-badge">RULE-BASED</span></div>
+        <div class="scanner-result" id="scanner-result"><div class="scan-meter"><div class="meter-ring">—</div></div><div><span class="eyebrow">INDICATOR-BASED · NOT AI PREDICTIONS</span><strong>Scanner ready</strong></div><span class="scan-badge">RULE-BASED</span></div>
       </section>
       <section class="panel bots-panel">
         <div class="panel-heading"><div><h2>Trading bots</h2><p>Signals for the shared PIPMASTER market</p></div><button class="text-button" data-view="bots">Browse all <span>→</span></button></div>
@@ -927,7 +934,7 @@ function tradePanelView(availableBalance) {
   }
 
   const stake = Math.min(state.stake, availableBalance);
-  return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the PIPMASTER MANAGED Live market." : "Test your strategy with demo funds on the Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
+  return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the live market." : "Test your strategy with demo funds on the Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
     <div class="trade-field"><label>TRADE TYPE</label><div class="segmented" role="tablist"><button class="${state.tradeType === "digits" ? "selected" : ""}" data-trade-type="digits">Even / Odd</button><button class="${state.tradeType === "direction" ? "selected" : ""}" data-trade-type="direction">Over / Under</button></div></div>
     <div class="trade-field"><label>TRADE DURATION <span>Admin setting</span></label><div class="duration-select">${[10, 30, 60, 300].map((seconds) => `<button class="${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}</button>`).join("")}</div></div>
     <div class="trade-field"><label>STAKE <span>Available ${formatMoney(availableBalance)}</span></label><div class="stake-control"><button data-stake="-">−</button><div><span>$</span><input id="stake" inputmode="decimal" type="number" min="1" max="${availableBalance}" step="0.01" value="${stake}" aria-label="Trade stake"></div><button data-stake="+">+</button></div><div class="quick-stakes">${[1, 5, 10, 25].map((amount) => `<button data-quick-stake="${amount}">$${amount}</button>`).join("")}</div></div>
@@ -1466,7 +1473,9 @@ function bindEvents() {
   });
   app.querySelectorAll("[data-timeframe]").forEach((button) => button.addEventListener("click", () => {
     app.querySelectorAll("[data-timeframe]").forEach((item) => item.classList.toggle("active", item === button));
-    showToast(`${button.dataset.timeframe} chart interval selected`);
+    chartTimeframe = button.dataset.timeframe;
+    chartPointer = null;
+    drawChart(app.querySelector("#price-chart"));
   }));
 }
 
@@ -2055,7 +2064,71 @@ function startChart() {
       chartTimer = window.setTimeout(poll, Math.max(250, Math.min(2000, 900 / state.chartSpeed)));
     }
   };
-  poll();
+  chartTimer = window.setTimeout(poll, Math.max(250, Math.min(2000, 900 / state.chartSpeed)));
+}
+
+function tickTimestamp(tick) {
+  const value = tick.time ?? tick.timestamp ?? tick.created_at ?? tick.createdAt;
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric < 1e12 ? numeric * 1000 : numeric;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function bindChartInteractions(canvas) {
+  if (!canvas) return;
+  chartPointer = null;
+  canvas.addEventListener("pointermove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    chartPointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    drawChart(canvas);
+  });
+  canvas.addEventListener("pointerleave", () => {
+    chartPointer = null;
+    drawChart(canvas);
+  });
+}
+
+function chartCandles(points) {
+  const intervals = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
+  const fallbackGroupSizes = { "1m": 5, "5m": 10, "15m": 15, "1h": 30 };
+  const interval = intervals[chartTimeframe] || intervals["1m"];
+  const candleFromPoints = (items, time) => ({
+    time,
+    open: items[0].y,
+    high: Math.max(...items.map((point) => point.y)),
+    low: Math.min(...items.map((point) => point.y)),
+    close: items[items.length - 1].y,
+  });
+  const hasTimestamps = points.some((point) => Number.isFinite(point.time));
+
+  if (!hasTimestamps) {
+    const groupSize = fallbackGroupSizes[chartTimeframe] || fallbackGroupSizes["1m"];
+    const groups = [];
+    for (let index = 0; index < points.length; index += groupSize) {
+      groups.push(points.slice(index, index + groupSize));
+    }
+    const now = Date.now();
+    return groups.map((group, index) => candleFromPoints(
+      group,
+      now - (groups.length - index - 1) * interval,
+    ));
+  }
+
+  const groups = new Map();
+  points.forEach((point, index) => {
+    const time = Number.isFinite(point.time)
+      ? point.time
+      : Date.now() - (points.length - index - 1) * 1000;
+    const bucket = Math.floor(time / interval) * interval;
+    const group = groups.get(bucket) || [];
+    group.push(point);
+    groups.set(bucket, group);
+  });
+  return [...groups.entries()]
+    .sort(([first], [second]) => first - second)
+    .map(([time, group]) => candleFromPoints(group, time));
 }
 
 function drawChart(canvas) {
@@ -2072,56 +2145,161 @@ function drawChart(canvas) {
   ctx.clearRect(0, 0, width, height);
   const isLive = state.mode === "live";
   const points = isLive ? liveChartPoints : chartPoints;
-  if (points.length === 0) return;
-  ctx.strokeStyle = "rgba(151,168,190,.09)";
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = 16 + (height - 32) * i / 4;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
+  const currentPrice = isLive ? livePrice : price;
+  const candles = chartCandles(points);
+  if (!candles.length) {
+    candles.push({ time: Date.now(), open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice });
   }
-  for (let i = 0; i <= 6; i++) {
-    const x = width * i / 6;
+  const visibleCandles = candles.slice(-100);
+  const left = 12;
+  const right = width - 68;
+  const top = 14;
+  const bottom = height - 28;
+  const plotWidth = right - left;
+  const plotHeight = bottom - top;
+  const values = visibleCandles.flatMap((candle) => [candle.high, candle.low]);
+  values.push(currentPrice);
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const padding = Math.max((rawMax - rawMin) * 0.12, Math.abs(currentPrice) * 0.00015, 0.01);
+  const min = rawMin - padding;
+  const max = rawMax + padding;
+  const range = max - min;
+  const yForPrice = (value) => bottom - ((value - min) / range) * plotHeight;
+  const step = plotWidth / visibleCandles.length;
+  const candleWidth = Math.min(13, Math.max(3, step * 0.64));
+
+  ctx.fillStyle = "#0e151f";
+  ctx.fillRect(0, 0, width, height);
+  ctx.font = "10px DM Sans, sans-serif";
+  ctx.textBaseline = "middle";
+  for (let index = 0; index <= 5; index++) {
+    const y = top + (plotHeight * index) / 5;
+    const value = max - (range * index) / 5;
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.strokeStyle = "rgba(151,168,190,.13)";
+    ctx.lineWidth = 1;
     ctx.stroke();
+    ctx.fillStyle = "#8b98a9";
+    ctx.textAlign = "right";
+    ctx.fillText(value.toFixed(2), width - 8, y);
   }
-  const ys = points.map((point) => point.y);
-  const min = Math.min(...ys) - 0.07;
-  const max = Math.max(...ys) + 0.07;
-  const range = Math.max(max - min, 1);
-  const mapped = points.map((point, index) => ({
-    x: points.length === 1 ? width / 2 : index / (points.length - 1) * width,
-    y: height - 14 - ((point.y - min) / range) * (height - 28),
-  }));
-  const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, isLive ? "rgba(82, 161, 255, .20)" : "rgba(55, 207, 165, .20)");
-  gradient.addColorStop(1, isLive ? "rgba(82, 161, 255, 0)" : "rgba(55, 207, 165, 0)");
+
+  for (let index = 0; index <= 6; index++) {
+    const x = left + (plotWidth * index) / 6;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.strokeStyle = "rgba(151,168,190,.09)";
+    ctx.stroke();
+    if (index <= 6) {
+      const candleIndex = Math.min(visibleCandles.length - 1, Math.round((visibleCandles.length - 1) * index / 6));
+      const date = new Date(visibleCandles[candleIndex].time);
+      ctx.fillStyle = "#8b98a9";
+      ctx.textAlign = index === 0 ? "left" : index === 6 ? "right" : "center";
+      ctx.fillText(date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), x, height - 13);
+    }
+  }
+
+  visibleCandles.forEach((candle, index) => {
+    const x = left + step * index + step / 2;
+    const color = candle.close >= candle.open ? "#26a69a" : "#ef5350";
+    const openY = yForPrice(candle.open);
+    const closeY = yForPrice(candle.close);
+    const bodyTop = Math.min(openY, closeY);
+    const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+    ctx.beginPath();
+    ctx.moveTo(x, yForPrice(candle.high));
+    ctx.lineTo(x, yForPrice(candle.low));
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
+  });
+
+  const latest = visibleCandles[visibleCandles.length - 1];
+  const currentY = yForPrice(currentPrice);
+  ctx.save();
+  ctx.setLineDash([4, 4]);
   ctx.beginPath();
-  mapped.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
-  ctx.lineTo(width, height);
-  ctx.lineTo(0, height);
-  ctx.closePath();
-  ctx.fillStyle = gradient;
-  ctx.fill();
-  ctx.beginPath();
-  mapped.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
-  ctx.strokeStyle = isLive ? "#52a1ff" : "#40d8a6";
-  ctx.lineWidth = 2;
-  ctx.lineJoin = "round";
+  ctx.moveTo(left, currentY);
+  ctx.lineTo(right, currentY);
+  ctx.strokeStyle = isLive ? "rgba(82,161,255,.75)" : "rgba(65,213,164,.75)";
   ctx.stroke();
-  const current = mapped[mapped.length - 1];
+  ctx.restore();
+  ctx.fillStyle = isLive ? "#3886d8" : "#239b78";
+  ctx.fillRect(right + 1, currentY - 9, width - right - 1, 18);
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.fillText(currentPrice.toFixed(2), right + (width - right) / 2, currentY);
+
+  ctx.strokeStyle = "rgba(151,168,190,.2)";
   ctx.beginPath();
-  ctx.arc(current.x, current.y, 4, 0, Math.PI * 2);
-  ctx.fillStyle = isLive ? "#52a1ff" : "#42d8a6";
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(current.x, current.y, 8, 0, Math.PI * 2);
-  ctx.strokeStyle = isLive ? "rgba(82,161,255,.28)" : "rgba(66,216,166,.28)";
+  ctx.moveTo(right, top);
+  ctx.lineTo(right, height);
+  ctx.moveTo(left, bottom);
+  ctx.lineTo(right, bottom);
   ctx.stroke();
+
+  let hovered = null;
+  if (chartPointer
+    && chartPointer.x >= left && chartPointer.x <= right
+    && chartPointer.y >= top && chartPointer.y <= bottom) {
+    const index = Math.min(visibleCandles.length - 1, Math.floor((chartPointer.x - left) / step));
+    hovered = visibleCandles[index];
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = "rgba(210,220,232,.55)";
+    ctx.beginPath();
+    ctx.moveTo(chartPointer.x, top);
+    ctx.lineTo(chartPointer.x, bottom);
+    ctx.moveTo(left, chartPointer.y);
+    ctx.lineTo(right, chartPointer.y);
+    ctx.stroke();
+    ctx.restore();
+
+    const pointerPrice = max - ((chartPointer.y - top) / plotHeight) * range;
+    ctx.fillStyle = "#384454";
+    ctx.fillRect(right + 1, chartPointer.y - 9, width - right - 1, 18);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.fillText(pointerPrice.toFixed(2), right + (width - right) / 2, chartPointer.y);
+    const timeLabel = new Date(hovered.time).toLocaleString([], {
+      month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+    const labelWidth = Math.min(142, ctx.measureText(timeLabel).width + 16);
+    const labelX = Math.max(left, Math.min(chartPointer.x - labelWidth / 2, right - labelWidth));
+    ctx.fillStyle = "#263241";
+    ctx.fillRect(labelX, bottom + 1, labelWidth, height - bottom - 1);
+    ctx.fillStyle = "#dce4ee";
+    ctx.textAlign = "center";
+    ctx.fillText(timeLabel, labelX + labelWidth / 2, bottom + (height - bottom) / 2);
+  }
+
+  ctx.fillStyle = "#aab6c5";
+  ctx.textAlign = "left";
+  ctx.font = "10px DM Sans, sans-serif";
+  ctx.fillText(
+    `O ${latest.open.toFixed(2)}   H ${latest.high.toFixed(2)}   L ${latest.low.toFixed(2)}   C ${latest.close.toFixed(2)}`,
+    left,
+    7,
+  );
+  const readout = hovered || latest;
+  const readoutValues = {
+    "#chart-open": readout.open,
+    "#chart-high": readout.high,
+    "#chart-low": readout.low,
+    "#chart-close": readout.close,
+  };
+  Object.entries(readoutValues).forEach(([selector, value]) => {
+    const element = document.querySelector(selector);
+    if (element) element.textContent = value.toFixed(2);
+  });
+  const clock = document.querySelector("#chart-clock");
+  if (clock) clock.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 window.addEventListener("resize", () => {
