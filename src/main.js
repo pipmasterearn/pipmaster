@@ -901,7 +901,7 @@ function tradingView() {
     <section class="lower-grid">
       <section class="panel scanner-panel">
         <div class="panel-heading"><div class="scanner-title"><div class="scanner-icon">✳</div><div><h2>AI Market Scanner</h2><p>Indicator analysis of shared PIPMASTER market history</p></div></div><button class="subtle-button" data-action="scan">Run scan <span>↗</span></button></div>
-        <div class="scanner-result" id="scanner-result"><div class="scan-meter"><div class="meter-ring">—</div></div><div><span class="eyebrow">INDICATOR-BASED · NOT AI PREDICTIONS</span><strong>Scanner ready</strong></div><span class="scan-badge">RULE-BASED</span></div>
+        <div class="scanner-result" id="scanner-result"><div class="scan-meter"><div class="meter-ring">—</div></div><div><span class="eyebrow">INDICATOR-BASED · MARKET SIGNALS</span><strong>Scanner ready</strong></div></div>
       </section>
       <section class="panel bots-panel">
         <div class="panel-heading"><div><h2>Trading bots</h2><p>Signals for the shared PIPMASTER market</p></div><button class="text-button" data-view="bots">Browse all <span>→</span></button></div>
@@ -936,11 +936,11 @@ function tradePanelView(availableBalance) {
   const stake = Math.min(state.stake, availableBalance);
   return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the live market." : "Test your strategy with demo funds on the Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
     <div class="trade-field"><label>TRADE TYPE</label><div class="segmented" role="tablist"><button class="${state.tradeType === "digits" ? "selected" : ""}" data-trade-type="digits">Even / Odd</button><button class="${state.tradeType === "direction" ? "selected" : ""}" data-trade-type="direction">Over / Under</button></div></div>
-    <div class="trade-field"><label>TRADE DURATION <span>Admin setting</span></label><div class="duration-select">${[10, 30, 60, 300].map((seconds) => `<button class="${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}</button>`).join("")}</div></div>
+    <div class="trade-field"><label>TRADE DURATION</label><div class="duration-select">${[10, 30, 60, 300].map((seconds) => `<button class="${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}</button>`).join("")}</div></div>
     <div class="trade-field"><label>STAKE <span>Available ${formatMoney(availableBalance)}</span></label><div class="stake-control"><button data-stake="-">−</button><div><span>$</span><input id="stake" inputmode="decimal" type="number" min="1" max="${availableBalance}" step="0.01" value="${stake}" aria-label="Trade stake"></div><button data-stake="+">+</button></div><div class="quick-stakes">${[1, 5, 10, 25].map((amount) => `<button data-quick-stake="${amount}">$${amount}</button>`).join("")}</div></div>
     <div class="payout-preview"><span>Potential return <small>incl. stake</small></span><strong id="potential-return">${formatMoney(stake * (1 + state.payout / 100))}</strong><span class="payout-rate">${state.payout}% payout</span></div>
     <div class="trade-actions"><button class="trade-button even" data-choice="${state.tradeType === "digits" ? "even" : "over"}"><span>${state.tradeType === "digits" ? "EVEN" : "OVER"}</span><small>${state.tradeType === "digits" ? "Last digit 0, 2, 4, 6, 8" : "Price finishes above entry"}</small><b>↗</b></button><button class="trade-button odd" data-choice="${state.tradeType === "digits" ? "odd" : "under"}"><span>${state.tradeType === "digits" ? "ODD" : "UNDER"}</span><small>${state.tradeType === "digits" ? "Last digit 1, 3, 5, 7, 9" : "Price finishes below entry"}</small><b>↘</b></button></div>
-    <div class="trade-footnote">${isLive ? `The ${formatMoney(stake)} stake is reserved from your wallet. Wins return the stake plus the displayed ${state.payout}% profit; losses forfeit the stake. Positions settle against the Live market shown above.` : "Demo outcomes use the Demo market price when the timer expires."}</div>`;
+  `;
 }
 
 function botCard(bot) {
@@ -1971,7 +1971,7 @@ async function runScanner() {
     return;
   }
   const result = app.querySelector("#scanner-result");
-  if (result) result.innerHTML = `<div class="scan-meter"><div class="meter-ring">${Number(data.strength)}<small>%</small></div></div><div><span class="eyebrow">INDICATOR SIGNAL · NOT WIN ODDS</span><strong>${escapeHtml(data.direction)}</strong><p>${escapeHtml(data.advice)}. Rule-based analysis of shared PIPMASTER market history; no AI predictions or win probability.</p></div><span class="scan-badge">RULE-BASED</span>`;
+  if (result) result.innerHTML = `<div class="scan-meter"><div class="meter-ring">${Number(data.strength)}<small>%</small></div></div><div><span class="eyebrow">INDICATOR SIGNAL · NOT WIN ODDS</span><strong>${escapeHtml(data.direction)}</strong></div>`;
 }
 
 async function runBot() {
