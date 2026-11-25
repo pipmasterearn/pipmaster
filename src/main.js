@@ -50,11 +50,30 @@ let price = 3842.61;
 let chartPoints = [];
 let livePrice = 3842.61;
 let liveChartPoints = [];
-let chartTimeframe = "1m";
+let chartTimeframe = "5s";
+let chartDisplay = "candles";
 let chartPointer = null;
+let chartTool = "crosshair";
+let chartZoom = 1;
+let chartOffset = 0;
+let chartDrag = null;
+let chartDrawingDraft = null;
+let chartDrawings = [];
+let chartRenderState = null;
+let chartSettings = { showGrid: true, showCurrentPrice: true };
+let chartIndicators = { sma: false, ema: false, rsi: false, divergence: false };
+let chartIndicatorAlertEnabled = false;
+let chartIndicatorAlertKey = "";
+let chartPriceAlert = null;
+let marketFavorited = false;
+let marketStatus = { isOpen: false, notice: "Checking market status" };
+let marketStatusLoaded = false;
+let marketStatusLastAttemptAt = 0;
+let pendingTradeReview = null;
 let chartTimer;
 let toastTimer;
 let botSignal = null;
+let botSession = { status: "stopped", startedAt: null, signals: [] };
 let settingsSaveTimer;
 let workspaceUserId = null;
 let workspaceLoadPromise = null;
@@ -118,7 +137,7 @@ function render() {
         <div class="side-label">WORKSPACE</div>
         <nav class="side-nav" aria-label="Main navigation">
           ${navItem("trade", "⌁", "Trade")}
-          ${navItem("bots", "◈", "Bot market", '<span class="nav-tag">NEW</span>')}
+          ${navItem("bots", "◈", "Strategies", '<span class="nav-tag">SIGNALS</span>')}
           ${navItem("history", "↗", "Activity")}
           ${navItem("wallet", "▣", "Wallet")}
         </nav>
@@ -130,7 +149,7 @@ function render() {
       <main class="main">
         <header class="topbar">
           <button class="mobile-brand" type="button" data-action="admin-gate" aria-label="PIPMASTER admin sign in"><span class="brand-mark"><span></span><span></span><span></span></span> PIP<span>MASTER</span></button>
-          <div class="breadcrumb"><span>Workspace</span><b>/</b><strong>${isAdmin ? "Admin controls" : isHistory ? "Activity" : "Trading terminal"}</strong></div>
+          <div class="breadcrumb"><span>Workspace</span><b>/</b><strong>${isAdmin ? "Admin controls" : isHistory ? "Activity" : state.activeView === "bots" ? "Strategies & signals" : "Trading terminal"}</strong></div>
           <div class="top-actions">
             <div class="account-chip"><span class="status-dot"></span> ${state.mode === "demo" ? "Demo account" : "Live wallet"}</div>
             <div class="notification-control">
@@ -146,7 +165,7 @@ function render() {
         </div>
         <nav class="mobile-nav" aria-label="Mobile navigation">
           ${navItem("trade", "⌁", "Trade")}
-          ${navItem("bots", "◈", "Bots")}
+          ${navItem("bots", "◈", "Strategies")}
           ${navItem("history", "↗", "Activity")}
           ${navItem("wallet", "▣", "Wallet")}
         </nav>
@@ -303,6 +322,7 @@ async function refreshTerminalSnapshot(renderOnChange = false) {
   const { data, error } = await supabase.rpc("get_terminal_snapshot");
   if (error) throw error;
 
+  const previousPriceValue = price;
   const previousSettings = JSON.stringify([state.volatility, state.drift, state.chartSpeed, state.payout]);
   const previousTrades = JSON.stringify(state.trades);
   price = Number(data.price);
@@ -317,6 +337,7 @@ async function refreshTerminalSnapshot(renderOnChange = false) {
   chartPoints = (Array.isArray(data.ticks) ? data.ticks : [])
     .map((tick, index) => ({ x: index, y: Number(tick.price), time: tickTimestamp(tick) }))
     .filter((point) => Number.isFinite(point.y));
+  if (state.mode === "demo") checkChartPriceAlert(previousPriceValue, price);
 
   const settingsChanged = !pendingLocalSettings
     && previousSettings !== JSON.stringify([state.volatility, state.drift, state.chartSpeed, state.payout]);
@@ -343,10 +364,12 @@ async function refreshLiveMarketSnapshot() {
   const { data, error } = await supabase.rpc("get_live_market_snapshot");
   if (error) throw error;
 
+  const previousPriceValue = livePrice;
   livePrice = Number(data.price);
   liveChartPoints = (Array.isArray(data.ticks) ? data.ticks : [])
     .map((tick, index) => ({ x: index, y: Number(tick.price), time: tickTimestamp(tick) }))
     .filter((point) => Number.isFinite(point.y));
+  if (state.mode === "live") checkChartPriceAlert(previousPriceValue, livePrice);
 
   if (state.mode === "live") {
     const priceEl = document.querySelector("#current-price");
@@ -396,6 +419,76 @@ async function refreshWalletSnapshot(renderOnChange = false) {
   )) render();
 }
 
+async function loadMarketFavorite() {
+  const { data, error } = await supabase
+    .from("market_watchlist")
+    .select("market_symbol")
+    .eq("market_symbol", "PIPMASTER")
+    .maybeSingle();
+  if (error) throw error;
+  marketFavorited = Boolean(data);
+  syncMarketFavoriteButton();
+}
+
+async function toggleMarketFavorite(event) {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    if (marketFavorited) {
+      const { error } = await supabase
+        .from("market_watchlist")
+        .delete()
+        .eq("market_symbol", "PIPMASTER");
+      if (error) throw error;
+      marketFavorited = false;
+      showToast("PIPMASTER market removed from your watchlist.");
+    } else {
+      const { error } = await supabase
+        .from("market_watchlist")
+        .insert({ user_id: auth.user.id, market_symbol: "PIPMASTER" });
+      if (error) throw error;
+      marketFavorited = true;
+      showToast("PIPMASTER market saved to your watchlist.");
+    }
+    syncMarketFavoriteButton();
+  } catch (error) {
+    showToast(`Could not update your watchlist: ${error.message}`);
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+}
+
+function syncMarketFavoriteButton() {
+  const button = app.querySelector('[data-action="toggle-market-favorite"]');
+  if (!button) return;
+  button.classList.toggle("saved", marketFavorited);
+  button.setAttribute("aria-pressed", String(marketFavorited));
+  const label = marketFavorited
+    ? "Remove PIPMASTER market from watchlist"
+    : "Add PIPMASTER market to watchlist";
+  button.setAttribute("aria-label", label);
+  button.title = marketFavorited ? "Remove from watchlist" : "Add to watchlist";
+}
+
+async function loadMarketStatus() {
+  const { data, error } = await supabase.rpc("get_market_status");
+  if (error) throw error;
+  if (typeof data?.isOpen !== "boolean") {
+    throw new Error("The market status response was invalid.");
+  }
+  const nextStatus = {
+    isOpen: data.isOpen,
+    notice: String(data.notice || "").trim(),
+  };
+  const changed = !marketStatusLoaded
+    || nextStatus.isOpen !== marketStatus.isOpen
+    || nextStatus.notice !== marketStatus.notice;
+  marketStatus = nextStatus;
+  marketStatusLoaded = true;
+  marketStatusLastAttemptAt = Date.now();
+  return changed;
+}
+
 async function initializeWorkspace(user) {
   if (workspaceUserId === user.id) {
     if (workspaceLoadPromise) await workspaceLoadPromise;
@@ -410,6 +503,7 @@ async function initializeWorkspace(user) {
         loadStrategyCatalog(),
         refreshTerminalSnapshot(),
         refreshWalletSnapshot(),
+        loadMarketStatus(),
       ]);
       if (window.location.hash === "#/admin/setup" && auth.profile?.role === "admin") {
         state.activeView = "admin";
@@ -420,6 +514,7 @@ async function initializeWorkspace(user) {
         auth.screen = window.location.hash.includes("type=recovery") ? "reset-password" : "workspace";
       }
       startChart();
+      loadMarketFavorite().catch((error) => showToast(`Could not load market watchlist: ${error.message}`));
       void loadNotifications();
     } catch (error) {
       workspaceUserId = null;
@@ -506,6 +601,7 @@ async function beginAuth() {
         state.trades = [];
         chartPoints = [];
         liveChartPoints = [];
+        marketFavorited = false;
         botSignal = null;
         auth.profile = null;
         auth.profileError = "";
@@ -751,6 +847,9 @@ async function signOut() {
   auth.screen = "login";
   workspaceUserId = null;
   workspaceLoadPromise = null;
+  marketStatusLoaded = false;
+  marketStatusLastAttemptAt = 0;
+  pendingTradeReview = null;
   walletTransactions = [];
   walletTrades = [];
   walletAdminData = null;
@@ -805,19 +904,54 @@ function tradingView() {
     <div class="terminal-grid">
       <section class="panel chart-panel ${isLive ? "live-chart" : "demo-chart"}">
         <div class="panel-heading chart-heading">
-          <div class="asset-title"><div class="asset-icon">P</div><div><strong>${isLive ? "PIPMASTER Live Market" : "PIPMASTER Demo Market"}</strong><small>${isLive ? "Live wallet market" : "Demo funds market"}</small></div><span class="live-pill"><i></i> ${isLive ? "LIVE MARKET" : "DEMO MARKET"}</span></div>
+          <div class="asset-title"><div class="asset-icon">P</div><div><strong>${isLive ? "PIPMASTER Live Market" : "PIPMASTER Demo Market"}</strong><small>${isLive ? "Live wallet market" : "Demo funds market"}</small></div><span class="live-pill"><i></i> ${isLive ? "LIVE MARKET" : "DEMO MARKET"}</span><span class="market-status-chip ${marketStatusLoaded && marketStatus.isOpen ? "open" : "suspended"}">${marketStatusLoaded ? (marketStatus.isOpen ? "OPEN" : "SUSPENDED") : "STATUS UNAVAILABLE"}</span><button class="market-favorite ${marketFavorited ? "saved" : ""}" type="button" data-action="toggle-market-favorite" aria-label="${marketFavorited ? "Remove PIPMASTER market from watchlist" : "Add PIPMASTER market to watchlist"}" aria-pressed="${marketFavorited}" title="${marketFavorited ? "Remove from watchlist" : "Add to watchlist"}">★</button></div>
           <div class="price-summary"><div class="price-value"><strong id="current-price">${activePrice.toFixed(2)}</strong><small>USD</small></div><span class="${priceChange >= 0 ? "positive" : "negative"}" id="price-change">${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(2)}%</span></div>
         </div>
         <div class="chart-toolbar">
           <div class="chart-tabs"><button class="active">Chart</button><button data-view="history">${isLive ? "Live positions" : "Positions"} <span class="count">${activeTrades.filter((trade) => trade.status === "open").length}</span></button></div>
-          <div class="timeframes"><span class="chart-type-label">Candles</span>${["1m", "5m", "15m", "1h"].map((item) => `<button class="${item === chartTimeframe ? "active" : ""}" data-timeframe="${item}">${item}</button>`).join("")}</div>
+          <div class="timeframes" role="group" aria-label="Chart timeframe"><span class="chart-type-label">Interval</span>${["tick", "5s", "15s", "30s", "1m", "5m", "15m", "1h"].map((item) => `<button class="${item === chartTimeframe ? "active" : ""}" data-timeframe="${item}">${item}</button>`).join("")}</div>
         </div>
-        <div class="chart-wrap"><canvas id="price-chart" role="img" aria-label="${isLive ? "Live" : "Demo"} PIPMASTER candlestick chart with price and time scales"></canvas></div>
+        <div class="chart-actions">
+          <div class="chart-control-group" role="group" aria-label="Chart display">
+            <button type="button" class="${chartDisplay === "candles" ? "active" : ""}" data-chart-display="candles">Candles</button>
+            <button type="button" class="${chartDisplay === "line" ? "active" : ""}" data-chart-display="line">Line</button>
+          </div>
+          <div class="chart-control-group" role="group" aria-label="Chart tools">
+            <button type="button" class="${chartTool === "crosshair" ? "active" : ""}" data-chart-tool="crosshair" title="Crosshair">Crosshair</button>
+            <button type="button" class="${chartTool === "measure" ? "active" : ""}" data-chart-tool="measure" title="Measure price and time">Measure</button>
+            <button type="button" class="${chartTool === "pan" ? "active" : ""}" data-chart-tool="pan" title="Drag to pan">Pan</button>
+            <button type="button" class="${chartTool === "trendline" ? "active" : ""}" data-chart-tool="trendline" title="Draw a trendline">Trendline</button>
+            <button type="button" class="${chartTool === "fibonacci" ? "active" : ""}" data-chart-tool="fibonacci" title="Draw Fibonacci retracement levels">Fib</button>
+            <button type="button" class="${chartTool === "annotation" ? "active" : ""}" data-chart-tool="annotation" title="Add a chart annotation">Note</button>
+            <button type="button" data-chart-action="clear-drawings" title="Clear drawings and annotations">Clear drawings</button>
+          </div>
+          <div class="chart-control-group chart-shortcuts" role="group" aria-label="Chart actions">
+            <button type="button" data-chart-action="zoom-out" title="Zoom out">−</button>
+            <button type="button" data-chart-action="zoom-in" title="Zoom in">+</button>
+            <button type="button" data-chart-action="reset" title="Reset zoom and pan">Reset</button>
+            <button type="button" data-chart-action="fullscreen" title="Fullscreen">Fullscreen</button>
+            <button type="button" data-chart-action="snapshot" title="Save chart snapshot">Export</button>
+          </div>
+          <div class="chart-control-group" role="group" aria-label="Indicators and chart settings">
+            <button type="button" class="${chartIndicators.sma ? "active" : ""}" data-chart-indicator="sma">SMA 10</button>
+            <button type="button" class="${chartIndicators.ema ? "active" : ""}" data-chart-indicator="ema">EMA 20</button>
+            <button type="button" class="${chartIndicators.rsi ? "active" : ""}" data-chart-indicator="rsi">RSI 14</button>
+            <button type="button" class="${chartIndicators.divergence ? "active" : ""}" data-chart-indicator="divergence">Divergence</button>
+            <button type="button" class="${chartIndicatorAlertEnabled ? "active" : ""}" data-chart-action="toggle-indicator-alert">SMA/EMA alert</button>
+            <button type="button" class="${chartSettings.showGrid ? "active" : ""}" data-chart-action="toggle-grid">Grid</button>
+            <button type="button" class="${chartSettings.showCurrentPrice ? "active" : ""}" data-chart-action="toggle-price-line">Price line</button>
+            <button type="button" data-chart-action="price-alert">Price alert</button>
+            <button type="button" disabled title="Volume data is not provided by the current price feed">Volume unavailable</button>
+            <button type="button" disabled title="Market depth data is not provided">Depth unavailable</button>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="price-chart" role="img" aria-label="${isLive ? "Live" : "Demo"} PIPMASTER ${chartDisplay === "line" ? "line" : "candlestick"} chart with price and time scales"></canvas></div>
         <div class="chart-legend"><span><b>O</b><strong id="chart-open">—</strong><b>H</b><strong id="chart-high">—</strong><b>L</b><strong id="chart-low">—</strong><b>C</b><strong id="chart-close">—</strong></span><span class="chart-source">PIPMASTER market · <span id="chart-clock">--:--:--</span></span></div>
       </section>
 
       <section class="panel trade-panel">${tradePanelView(active)}</section>
     </div>
+    <dialog class="trade-review-dialog" id="trade-review"></dialog>
 
     <section class="lower-grid">
       <section class="panel scanner-panel">
@@ -842,9 +976,16 @@ function tradingView() {
 
 function tradePanelView(availableBalance) {
   const isLive = state.mode === "live";
+  const canPlaceTrade = marketStatusLoaded && marketStatus.isOpen;
+  const marketNotice = !marketStatusLoaded
+    ? "Market status could not be verified. New positions are unavailable until status loads."
+    : marketStatus.isOpen
+      ? ""
+      : marketStatus.notice || "New positions are suspended by the administrator.";
+  const marketNoticeView = `<div class="market-notice ${canPlaceTrade ? "market-open" : "market-suspended"}" role="status"><strong>${canPlaceTrade ? "Market open" : marketStatusLoaded ? "Market suspended" : "Market status unavailable"}</strong>${marketNotice ? `<span>${escapeHtml(marketNotice)}</span>` : ""}</div>`;
   if (availableBalance < 1) {
     const minimumTopUp = Math.max(2, Math.ceil((1 - availableBalance) * 100) / 100);
-    return `<div class="wallet-live-message">
+    return `${marketNoticeView}<div class="wallet-live-message">
       <span class="balance-icon">◈</span>
       <h2>Insufficient ${isLive ? "wallet" : "demo"} balance</h2>
       <p>The minimum trade is $1.00. Your available ${isLive ? "wallet" : "demo"} balance is ${formatMoney(availableBalance)}.${isLive ? ` Deposit at least ${formatMoney(minimumTopUp)} (wallet deposits start at $2.00) to unlock live trading controls.` : " Reset your demo balance to continue."}</p>
@@ -855,12 +996,12 @@ function tradePanelView(availableBalance) {
   }
 
   const stake = Math.min(state.stake, availableBalance);
-  return `<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the live market." : "Test your strategy with demo funds on the Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
+  return `${marketNoticeView}<div class="panel-heading"><div><h2>Place a ${isLive ? "live" : "demo"} position</h2><p>${isLive ? "Uses available wallet funds on the live market." : "Test your strategy with demo funds on the Demo market."}</p></div><span class="${isLive ? "live-pill" : "demo-label"}">${isLive ? "LIVE" : "DEMO"}</span></div>
     <div class="trade-field"><label>TRADE TYPE</label><div class="segmented" role="tablist"><button class="${state.tradeType === "digits" ? "selected" : ""}" data-trade-type="digits">Even / Odd</button><button class="${state.tradeType === "direction" ? "selected" : ""}" data-trade-type="direction">Over / Under</button></div></div>
     <div class="trade-field"><label>TRADE DURATION</label><div class="duration-select">${[10, 30, 60, 300].map((seconds) => `<button class="${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}</button>`).join("")}</div></div>
     <div class="trade-field"><label>STAKE <span>Available ${formatMoney(availableBalance)}</span></label><div class="stake-control"><button data-stake="-">−</button><div><span>$</span><input id="stake" inputmode="decimal" type="number" min="1" max="${availableBalance}" step="0.01" value="${stake}" aria-label="Trade stake"></div><button data-stake="+">+</button></div><div class="quick-stakes">${[1, 5, 10, 25].map((amount) => `<button data-quick-stake="${amount}">$${amount}</button>`).join("")}</div></div>
     <div class="payout-preview"><span>Potential return <small>incl. stake</small></span><strong id="potential-return">${formatMoney(stake * (1 + state.payout / 100))}</strong><span class="payout-rate">${state.payout}% payout</span></div>
-    <div class="trade-actions"><button class="trade-button even" data-choice="${state.tradeType === "digits" ? "even" : "over"}"><span>${state.tradeType === "digits" ? "EVEN" : "OVER"}</span><small>${state.tradeType === "digits" ? "Last digit 0, 2, 4, 6, 8" : "Price finishes above entry"}</small><b>↗</b></button><button class="trade-button odd" data-choice="${state.tradeType === "digits" ? "odd" : "under"}"><span>${state.tradeType === "digits" ? "ODD" : "UNDER"}</span><small>${state.tradeType === "digits" ? "Last digit 1, 3, 5, 7, 9" : "Price finishes below entry"}</small><b>↘</b></button></div>
+    <div class="trade-actions"><button class="trade-button even" data-choice="${state.tradeType === "digits" ? "even" : "over"}" ${canPlaceTrade ? "" : "disabled"}><span>${state.tradeType === "digits" ? "EVEN" : "OVER"}</span><small>${state.tradeType === "digits" ? "Last digit 0, 2, 4, 6, 8" : "Price finishes above entry"}</small><b>↗</b></button><button class="trade-button odd" data-choice="${state.tradeType === "digits" ? "odd" : "under"}" ${canPlaceTrade ? "" : "disabled"}><span>${state.tradeType === "digits" ? "ODD" : "UNDER"}</span><small>${state.tradeType === "digits" ? "Last digit 1, 3, 5, 7, 9" : "Price finishes below entry"}</small><b>↘</b></button></div>
   `;
 }
 
@@ -899,6 +1040,7 @@ function adminView() {
         ${rangeSetting("chartSpeed", "Chart speed", state.chartSpeed, 0.5, 2, 0.1, `${state.chartSpeed.toFixed(1)}×`, "Changes how quickly market ticks are drawn.")}
         <div class="setting-block"><div class="setting-label"><div><strong>Position payout</strong><small>Profit percentage for new demo and wallet positions.</small></div><div class="range-value"><input type="number" id="payout-input" min="1" max="95" value="${state.payout}">%</div></div><input class="range-input" data-setting="payout" type="range" min="1" max="95" step="1" value="${state.payout}"><div class="setting-hint">Wallet positions snapshot this setting when opened. Returns are not guaranteed.</div></div>
         <div class="setting-block"><div class="setting-label"><div><strong>Trade durations</strong><small>Available position expiry options.</small></div></div><div class="setting-options">${[10, 30, 60, 300].map((seconds) => `<button class="option-chip ${state.duration === seconds ? "selected" : ""}" data-duration="${seconds}">${seconds < 60 ? `${seconds}s` : `${seconds / 60} min`}</button>`).join("")}</div></div>
+        <div class="market-control-block"><div><strong>Market availability</strong><small>Suspending blocks new demo and wallet positions; open positions still settle normally.</small></div><label class="market-toggle"><input id="market-status-toggle" type="checkbox" ${marketStatus.isOpen ? "checked" : ""} ${marketStatusLoaded ? "" : "disabled"}><span>Accept new positions</span></label><label class="market-notice-field">Maintenance notice<input id="market-status-notice" type="text" maxlength="240" value="${escapeHtml(marketStatus.notice)}" placeholder="Optional notice shown to users"></label><button class="auth-primary compact" type="button" data-action="save-market-status" ${marketStatusLoaded ? "" : "disabled"}>Save market status</button></div>
       </section>
       <section class="panel admin-side-panel"><div class="panel-heading"><div><h2>My account</h2><p>Administrator account overview</p></div><span class="status-badge open">ACTIVE</span></div><div class="admin-stat"><span>Demo balance</span><strong>${formatMoney(state.demoBalance)}</strong></div><div class="admin-stat"><span>My wallet balance</span><strong>${formatMoney(state.liveBalance)}</strong></div><div class="admin-stat"><span>Registered users</span><strong>${Number(adminOverviewData?.summary?.registeredUsers || 0).toLocaleString()}</strong></div><button class="secondary-button wide" data-action="reset-demo">Reset demo balance</button>
         <div class="admin-separator"></div><div class="admin-helper"><span>ⓘ</span><p>All user balances, requests, and expense totals below are read from protected Supabase records.</p></div>
@@ -1147,6 +1289,7 @@ function rangeSetting(key, label, value, min, max, step, display, description) {
 
 function simpleView(view) {
   if (view === "wallet") return walletView();
+  if (view === "bots") return botDashboardView();
   const titles = { bots: ["Trading bot signals", "Explore indicator-based strategies for the shared PIPMASTER market."], profile: ["Profile", "Manage account information stored securely in Supabase."] };
   const [title, subtitle] = titles[view] || ["Page not found", "Choose a page from the navigation."];
   return `<section class="page-heading"><div><div class="eyebrow">PIPMASTER</div><h1>${title}</h1><p>${subtitle}</p></div></section>
@@ -1154,6 +1297,62 @@ function simpleView(view) {
     <section class="bot-list">${strategyBots.map((bot) => `<button class="bot-market-card ${state.selectedBot === bot.id || state.selectedBot === bot.name ? "selected" : ""}" data-bot="${escapeHtml(bot.id)}"><span class="bot-symbol" style="--bot-color:${bot.color}">${escapeHtml(bot.icon)}</span><span><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.type)} · ${escapeHtml(bot.description)}</small></span><span class="bot-tier">${bot.price > 0 && !bot.owned ? `Unlock ${formatMoney(bot.price)}` : escapeHtml(bot.tier)}</span><span class="bot-arrow">${bot.owned || !bot.price ? "→" : "BUY"}</span></button>`).join("")}</section>
     ${botSignal ? `<div class="bot-signal"><div><span class="eyebrow">${escapeHtml(botSignal.bot)} · ${state.mode === "live" ? "LIVE WALLET" : "DEMO"} SIGNAL</span><strong>${botSignal.choice.toUpperCase()} · ${botSignal.strength} signal strength</strong><small>Indicator signal only; not a win probability. Review before placing.</small></div><button class="subtle-button" data-action="use-signal">Use signal</button></div>` : ""}
     <button class="auth-primary compact bot-signal-action" type="button" data-action="run-bot" ${strategyBots.length ? "" : "disabled"}>Generate ${escapeHtml(strategyBots.find((bot) => bot.id === state.selectedBot || bot.name === state.selectedBot)?.name || "bot")} signal</button>`;
+}
+
+function botDashboardView() {
+  const selectedBot = strategyBots.find((bot) => bot.id === state.selectedBot || bot.name === state.selectedBot);
+  const trades = state.mode === "live" ? walletTrades : state.trades;
+  const settledTrades = trades.filter((trade) => trade.status !== "open");
+  const wins = settledTrades.filter((trade) => Number(trade.result) > 0).length;
+  const losses = settledTrades.filter((trade) => Number(trade.result) < 0).length;
+  const openTrades = trades.filter((trade) => trade.status === "open").length;
+  const realizedPnl = settledTrades.reduce((total, trade) => total + Number(trade.result || 0), 0);
+  const sessionTrades = botSession.startedAt
+    ? trades.filter((trade) => Number(trade.time) >= botSession.startedAt)
+    : [];
+  const sessionPnl = sessionTrades
+    .filter((trade) => trade.status !== "open")
+    .reduce((total, trade) => total + Number(trade.result || 0), 0);
+  const isSessionRunning = botSession.status === "running";
+  const isSessionPaused = botSession.status === "paused";
+  const botExplanation = selectedBot?.strategyKey
+    ? ({
+      Pulse: "Uses recent price momentum to suggest a direction.",
+      Sentry: "Compares short and medium moving averages for directional alignment.",
+      Orbit: "Compares current price with the recent average to suggest mean reversion.",
+      LAMIA: "Uses a short, three-tick momentum change.",
+      INSTA: "Uses the latest tick-to-tick movement.",
+      SKPOT: "Compares short and slower price averages.",
+      VULJA: "Signals only when short-term trend and momentum agree.",
+    })[selectedBot.strategyKey] || "Uses the selected indicator algorithm to generate an Over/Under signal."
+    : "Select an available strategy to review its signal.";
+  return `<section class="page-heading"><div><div class="eyebrow">STRATEGY WORKSPACE</div><h1>Strategies &amp; signals</h1><p>Indicator signals require your review; this page never opens trades automatically.</p></div><div class="mode-switch" role="group" aria-label="Account mode"><button class="${state.mode === "demo" ? "selected" : ""}" data-mode="demo">Demo</button><button class="${state.mode === "live" ? "selected" : ""}" data-mode="live">Live</button></div></section>
+    ${strategyCatalogError ? `<div class="notice notice-warn"><span>ⓘ</span><div><strong>Strategy catalog unavailable</strong><p>${escapeHtml(strategyCatalogError)} Existing built-in strategies are shown; purchases require the database migration.</p></div></div>` : ""}
+    <div class="bot-workspace-grid">
+      <section class="panel bot-workspace-panel">
+        <div class="panel-heading"><div><h2>Choose a strategy</h2><p>Signals use the internal PIPMASTER price history.</p></div><span class="status-badge ${isSessionRunning ? "open" : "closed"}">${isSessionRunning ? "SESSION RUNNING" : isSessionPaused ? "SESSION PAUSED" : "SESSION STOPPED"}</span></div>
+        <div class="bot-list">${strategyBots.map((bot) => `<button class="bot-market-card ${state.selectedBot === bot.id || state.selectedBot === bot.name ? "selected" : ""}" data-bot="${escapeHtml(bot.id)}"><span class="bot-symbol" style="--bot-color:${bot.color}">${escapeHtml(bot.icon)}</span><span><strong>${escapeHtml(bot.name)}</strong><small>${escapeHtml(bot.type)} · ${escapeHtml(bot.description)}</small></span><span class="bot-tier">${bot.price > 0 && !bot.owned ? `Unlock ${formatMoney(bot.price)}` : bot.price > 0 ? "Unlocked · one-time" : "Included"}</span></button>`).join("")}</div>
+        ${selectedBot ? `<div class="bot-configuration">
+          <div class="bot-config-heading"><div><strong>${escapeHtml(selectedBot.name)} configuration</strong><small>${escapeHtml(botExplanation)}</small></div><span class="status-badge ${selectedBot.owned ? "closed" : "open"}">${selectedBot.owned ? "AVAILABLE" : "LOCKED"}</span></div>
+          <div class="bot-config-grid">
+            <label>Contract type<select disabled aria-label="Bot contract type"><option>Over / Under (directional)</option></select><small>These strategy signals return direction only.</small></label>
+            <label>Stake (USD)<input id="bot-config-stake" type="number" min="1" max="${state.mode === "live" ? state.liveBalance : state.demoBalance}" step="0.01" value="${Math.min(state.stake, state.mode === "live" ? state.liveBalance : state.demoBalance)}"><small>Applied to the next manually reviewed signal.</small></label>
+            <label>Duration<select id="bot-config-duration">${[10, 30, 60, 300].map((seconds) => `<option value="${seconds}" ${seconds === state.duration ? "selected" : ""}>${seconds < 60 ? `${seconds}s` : `${seconds / 60}m`}</option>`).join("")}</select><small>Fixed expiry; existing positions cannot be closed early.</small></label>
+            <label>Entitlement<div class="bot-entitlement">${selectedBot.owned ? (selectedBot.price > 0 ? `Unlocked once for ${formatMoney(selectedBot.price)}` : "Included with your account") : `One-time unlock · ${formatMoney(selectedBot.price)}`}</div><small>No recurring subscription or auto-renewal is configured.</small></label>
+          </div>
+          <div class="bot-risk-disclosure"><strong>Risk controls</strong><span>Each confirmed trade can lose its full stake. Stop-loss, take-profit, and trade limits do not control fixed-expiry positions in this signal-only mode. Manage stake and expiry before confirming every trade.</span></div>
+          <div class="bot-session-controls"><button class="auth-primary compact" type="button" data-action="bot-session-start" ${!selectedBot.owned || isSessionRunning ? "disabled" : ""}>${botSession.startedAt && botSession.status === "stopped" ? "Start new session" : "Start session"}</button><button class="secondary-button" type="button" data-action="bot-session-pause" ${!isSessionRunning ? "disabled" : ""}>Pause</button><button class="secondary-button" type="button" data-action="bot-session-resume" ${!isSessionPaused ? "disabled" : ""}>Resume</button><button class="secondary-button" type="button" data-action="bot-session-stop" ${botSession.status === "stopped" ? "disabled" : ""}>Stop</button><button class="${selectedBot.owned ? "subtle-button" : "auth-primary compact"}" type="button" data-action="run-bot" ${selectedBot.owned && !isSessionRunning ? "disabled" : ""}>${selectedBot.owned ? "Generate signal" : `Unlock once · ${formatMoney(selectedBot.price)}`}</button></div>
+          <p class="bot-session-note">Session controls start/pause/stop manual signal generation only. No trades are automated. Session history is kept for this page session.</p>
+        </div>` : `<div class="empty-state">No strategies are available right now.</div>`}
+      </section>
+      <aside class="bot-dashboard-side">
+        <section class="panel bot-metrics-panel"><div class="panel-heading"><div><h2>${state.mode === "live" ? "Live account activity" : "Demo account activity"}</h2><p>Latest ${trades.length} account positions; not bot-attributed.</p></div></div><div class="bot-metric-grid"><div><small>Open positions</small><strong>${openTrades}</strong></div><div><small>Wins</small><strong>${wins}</strong></div><div><small>Losses</small><strong>${losses}</strong></div><div><small>Realized P&amp;L</small><strong class="${realizedPnl >= 0 ? "positive" : "negative"}">${formatMoney(realizedPnl)}</strong></div></div></section>
+        <section class="panel bot-metrics-panel"><div class="panel-heading"><div><h2>Current signal session</h2><p>${botSession.startedAt ? `Started ${new Date(botSession.startedAt).toLocaleString()}` : "No session started."}</p></div></div><div class="bot-session-summary"><span>Signals logged (up to 100)</span><strong>${botSession.signals.length}</strong><span>Account P&amp;L since start</span><strong class="${sessionPnl >= 0 ? "positive" : "negative"}">${formatMoney(sessionPnl)}</strong><small>This is account-wide P&amp;L for the selected mode from the latest returned positions created since the session started; it is not strategy-attributed and may be incomplete if older than returned history.</small></div></section>
+        <section class="panel bot-metrics-panel"><div class="panel-heading"><div><h2>Signal log</h2><p>Signal strength is an indicator score, not a probability.</p></div></div>${botSession.signals.length ? `<div class="bot-signal-log">${botSession.signals.slice(0, 20).map((signal) => `<div><span><strong>${escapeHtml(signal.bot)}</strong><small>${new Date(signal.time).toLocaleTimeString()}</small></span><b>${escapeHtml(signal.choice.toUpperCase())}</b><span>${Number(signal.strength)} score</span></div>`).join("")}</div>` : `<div class="empty-state"><strong>No signals in this session</strong><p>Start a session and generate a signal for the selected strategy.</p></div>`}</section>
+      </aside>
+    </div>
+    <section class="panel bot-data-limits"><div><strong>Backtesting, optimization &amp; historical accuracy</strong><p>Not available as reliable metrics yet. The strategy RPC reads at most 30 recent ticks, and no durable signal/strategy attribution history is stored. The chart’s recent tick window is not a representative backtest sample; no win rate or confidence interval is claimed.</p></div><button class="secondary-button" type="button" disabled title="Requires retained historical ticks and stored strategy signals">Backtest unavailable</button></section>
+    ${botSignal ? `<div class="bot-signal"><div><span class="eyebrow">${escapeHtml(botSignal.bot)} · ${state.mode === "live" ? "LIVE WALLET" : "DEMO"} SIGNAL</span><strong>${botSignal.choice.toUpperCase()} · ${escapeHtml(botSignal.strength)} indicator score</strong><small>Not a win probability. Review the position and confirm manually to trade.</small></div><button class="subtle-button" data-action="use-signal">Review signal</button></div>` : ""}`;
 }
 
 function walletView() {
@@ -1354,6 +1553,7 @@ function bindEvents() {
       refreshLiveMarketSnapshot().catch((error) => showToast(`Live market update failed: ${error.message}`));
     }
   }));
+  app.querySelector('[data-action="toggle-market-favorite"]')?.addEventListener("click", toggleMarketFavorite);
   app.querySelectorAll("[data-trade-type]").forEach((button) => button.addEventListener("click", () => {
     state.tradeType = button.dataset.tradeType;
     render();
@@ -1361,6 +1561,10 @@ function bindEvents() {
   app.querySelectorAll("[data-duration]").forEach((button) => button.addEventListener("click", () => { state.duration = Number(button.dataset.duration); render(); }));
   app.querySelectorAll("[data-bot]").forEach((button) => button.addEventListener("click", () => {
     state.selectedBot = button.dataset.bot;
+    if (state.activeView === "bots") {
+      render();
+      return;
+    }
     app.querySelectorAll("[data-bot]").forEach((item) => item.classList.toggle("selected", item.dataset.bot === state.selectedBot));
     const selected = strategyBots.find((bot) => bot.id === state.selectedBot || bot.name === state.selectedBot);
     showToast(`${selected?.name || state.selectedBot} strategy selected`);
@@ -1368,13 +1572,43 @@ function bindEvents() {
   app.querySelectorAll("[data-quick-stake]").forEach((button) => button.addEventListener("click", () => setStake(Number(button.dataset.quickStake))));
   app.querySelectorAll("[data-stake]").forEach((button) => button.addEventListener("click", () => setStake(state.stake + (button.dataset.stake === "+" ? 5 : -5))));
   app.querySelector("#stake")?.addEventListener("change", (event) => setStake(Number(event.target.value)));
-  app.querySelectorAll("[data-choice]").forEach((button) => button.addEventListener("click", () => placeTrade(button.dataset.choice)));
+  app.querySelectorAll("[data-choice]").forEach((button) => button.addEventListener("click", () => showTradeReview(button.dataset.choice)));
+  app.querySelector('[data-action="save-market-status"]')?.addEventListener("click", saveMarketStatus);
   app.querySelectorAll("[data-setting]").forEach((input) => input.addEventListener("input", () => updateSetting(input.dataset.setting, Number(input.value))));
   app.querySelector("#payout-input")?.addEventListener("change", (event) => updateSetting("payout", Number(event.target.value)));
   app.querySelector('[data-action="reset-demo"]')?.addEventListener("click", resetDemo);
   app.querySelector('[data-action="clear-history"]')?.addEventListener("click", clearHistory);
   app.querySelector('[data-action="scan"]')?.addEventListener("click", runScanner);
   app.querySelector('[data-action="run-bot"]')?.addEventListener("click", runBot);
+  app.querySelector('[data-action="bot-session-start"]')?.addEventListener("click", () => {
+    const stake = Number(app.querySelector("#bot-config-stake")?.value);
+    const balance = state.mode === "live" ? state.liveBalance : state.demoBalance;
+    if (!Number.isFinite(stake) || stake < 1 || stake > balance) {
+      showToast(`Set a valid signal stake between $1.00 and your ${state.mode} balance.`);
+      return;
+    }
+    state.stake = stake;
+    state.duration = Number(app.querySelector("#bot-config-duration")?.value);
+    botSession = { status: "running", startedAt: Date.now(), signals: [] };
+    botSignal = null;
+    render();
+    showToast("Signal session started. No trades will open without your review and confirmation.");
+  });
+  app.querySelector('[data-action="bot-session-pause"]')?.addEventListener("click", () => {
+    botSession.status = "paused";
+    render();
+    showToast("Signal session paused.");
+  });
+  app.querySelector('[data-action="bot-session-resume"]')?.addEventListener("click", () => {
+    botSession.status = "running";
+    render();
+    showToast("Signal session resumed.");
+  });
+  app.querySelector('[data-action="bot-session-stop"]')?.addEventListener("click", () => {
+    botSession.status = "stopped";
+    render();
+    showToast("Signal session stopped.");
+  });
   app.querySelector('[data-action="use-signal"]')?.addEventListener("click", async () => {
     if (!botSignal) return;
     const balance = state.mode === "live" ? state.liveBalance : state.demoBalance;
@@ -1384,20 +1618,38 @@ function bindEvents() {
       showToast(state.mode === "live" ? "Insufficient wallet balance. Wallet deposits start at $2.00; deposit to reach the $1.00 trade minimum." : "Insufficient demo balance. Reset your demo balance to place the signal.");
       return;
     }
-    const stake = Math.min(state.stake, balance);
-    if (state.mode === "live" && !window.confirm(`Confirm ${botSignal.bot} ${botSignal.choice.toUpperCase()} position with a ${formatMoney(stake)} wallet stake? You can lose the full stake.`)) return;
-    state.stake = stake;
+    state.stake = Math.min(state.stake, balance);
     state.tradeType = "direction";
     state.activeView = "trade";
     render();
-    await placeTrade(botSignal.choice);
+    showTradeReview(botSignal.choice, botSignal.bot);
   });
   app.querySelectorAll("[data-timeframe]").forEach((button) => button.addEventListener("click", () => {
     app.querySelectorAll("[data-timeframe]").forEach((item) => item.classList.toggle("active", item === button));
     chartTimeframe = button.dataset.timeframe;
+    chartOffset = 0;
     chartPointer = null;
     drawChart(app.querySelector("#price-chart"));
   }));
+  app.querySelectorAll("[data-chart-display]").forEach((button) => button.addEventListener("click", () => {
+    chartDisplay = button.dataset.chartDisplay;
+    render();
+  }));
+  app.querySelectorAll("[data-chart-tool]").forEach((button) => button.addEventListener("click", () => {
+    chartTool = button.dataset.chartTool;
+    chartDrawingDraft = null;
+    app.querySelectorAll("[data-chart-tool]").forEach((item) => item.classList.toggle("active", item === button));
+    const canvas = app.querySelector("#price-chart");
+    if (canvas) canvas.style.cursor = chartTool === "pan" ? "grab" : chartTool === "crosshair" ? "crosshair" : "copy";
+    drawChart(canvas);
+  }));
+  app.querySelectorAll("[data-chart-indicator]").forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.chartIndicator;
+    chartIndicators[key] = !chartIndicators[key];
+    button.classList.toggle("active", chartIndicators[key]);
+    drawChart(app.querySelector("#price-chart"));
+  }));
+  app.querySelectorAll("[data-chart-action]").forEach((button) => button.addEventListener("click", () => handleChartAction(button.dataset.chartAction)));
 }
 
 async function handleWalletForm(event) {
@@ -1844,17 +2096,18 @@ async function resetDemo() {
 }
 
 async function placeTrade(choice) {
-  const isLive = state.mode === "live";
+  const isLive = choice.mode === "live";
+  const duration = choice.duration;
   const balance = isLive ? state.liveBalance : state.demoBalance;
-  const stake = Number(app.querySelector("#stake")?.value);
+  const stake = Number(choice.stake);
   if (!Number.isFinite(stake) || stake < 1 || stake > balance) {
     showToast(`Enter a valid stake of at least $1.00 within your ${isLive ? "wallet" : "demo"} balance.`);
     return;
   }
   const { error } = await supabase.rpc(isLive ? "place_wallet_trade" : "place_demo_trade", {
-    p_choice: choice,
+    p_choice: choice.choice,
     p_stake: stake,
-    p_duration_seconds: state.duration,
+    p_duration_seconds: duration,
   });
   if (error) {
     showToast(`Could not place ${isLive ? "wallet" : "demo"} position: ${error.message}`);
@@ -1864,10 +2117,88 @@ async function placeTrade(choice) {
     if (isLive) await refreshWalletSnapshot();
     else await refreshTerminalSnapshot();
     render();
-    showToast(`${isLive ? "Wallet-funded" : "Demo"} ${choice.toUpperCase()} position opened · ${state.duration}s`);
+    showToast(`${isLive ? "Wallet-funded" : "Demo"} ${choice.choice.toUpperCase()} position opened · ${duration}s`);
   } catch (refreshError) {
     render();
     showToast(`Position opened, but refresh failed: ${refreshError.message}`);
+  }
+}
+
+function showTradeReview(choice, botName = "") {
+  if (!marketStatusLoaded || !marketStatus.isOpen) {
+    showToast(marketStatus.notice || "New positions are currently unavailable.");
+    return;
+  }
+  const validChoices = ["even", "odd", "over", "under"];
+  if (!validChoices.includes(choice)) {
+    showToast("That position type is unavailable.");
+    return;
+  }
+  const isLive = state.mode === "live";
+  const balance = isLive ? state.liveBalance : state.demoBalance;
+  const stake = Number(app.querySelector("#stake")?.value);
+  if (!Number.isFinite(stake) || stake < 1 || stake > balance) {
+    showToast(`Enter a valid stake of at least $1.00 within your ${isLive ? "wallet" : "demo"} balance.`);
+    return;
+  }
+  const payout = Number(state.payout);
+  const returnAmount = stake * (1 + payout / 100);
+  const priceNow = isLive ? livePrice : price;
+  const duration = state.duration;
+  const expiryTime = new Date(Date.now() + duration * 1000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const labels = { even: "Even", odd: "Odd", over: "Over", under: "Under" };
+  const dialog = app.querySelector("#trade-review");
+  if (!dialog) {
+    showToast("Trade review is unavailable. Reopen the trading terminal and try again.");
+    return;
+  }
+  pendingTradeReview = { choice, stake, duration, mode: state.mode };
+  dialog.innerHTML = `<div class="trade-review-content">
+    <div class="eyebrow">POSITION REVIEW</div>
+    <h2>Confirm ${labels[choice]} position</h2>
+    <p>${botName ? `${escapeHtml(botName)} signal · ` : ""}${isLive ? "Wallet-funded" : "Demo funds"} · ${duration}s expiry</p>
+    <dl><div><dt>Stake</dt><dd>${formatMoney(stake)}</dd></div><div><dt>Potential return <small>including stake</small></dt><dd>${formatMoney(returnAmount)}</dd></div><div><dt>Market price now</dt><dd>${priceNow.toFixed(2)} USD</dd></div><div><dt>Expected expiry</dt><dd>${expiryTime}</dd></div></dl>
+    <p class="trade-cost-disclosure">No separate spread, slippage, or trading fee is configured. The final entry price is the PIPMASTER internal market price when your position is accepted; settlement is fixed to expiry.</p>
+    <p class="trade-risk-disclosure">You may lose the full stake. The expiry cannot be changed after opening.</p>
+    <div class="trade-review-actions"><button class="secondary-button" type="button" data-action="cancel-trade">Cancel</button><button class="auth-primary compact" type="button" data-action="confirm-trade">Confirm position</button></div>
+  </div>`;
+  dialog.showModal();
+  dialog.querySelector('[data-action="cancel-trade"]')?.addEventListener("click", () => dialog.close());
+  dialog.querySelector('[data-action="confirm-trade"]')?.addEventListener("click", async () => {
+    if (!pendingTradeReview) return;
+    const confirmedTrade = pendingTradeReview;
+    pendingTradeReview = null;
+    dialog.close();
+    await placeTrade(confirmedTrade);
+  });
+  dialog.addEventListener("close", () => { pendingTradeReview = null; }, { once: true });
+}
+
+async function saveMarketStatus(event) {
+  const button = event.currentTarget;
+  const isOpen = Boolean(app.querySelector("#market-status-toggle")?.checked);
+  const notice = String(app.querySelector("#market-status-notice")?.value || "").trim();
+  if (notice.length > 240) {
+    showToast("The maintenance notice must be 240 characters or fewer.");
+    return;
+  }
+  button.disabled = true;
+  try {
+    const { error } = await supabase.rpc("set_market_status", {
+      p_is_open: isOpen,
+      p_notice: notice,
+    });
+    if (error) throw error;
+    await loadMarketStatus();
+    render();
+    showToast(isOpen ? "Market opened for new positions." : "Market suspended for new positions.");
+  } catch (error) {
+    showToast(`Could not update market status: ${error.message}`);
+    if (button.isConnected) button.disabled = false;
   }
 }
 
@@ -1901,6 +2232,10 @@ async function runBot() {
     showToast("Select an available bot first.");
     return;
   }
+  if (state.activeView === "bots" && bot.owned && botSession.status !== "running") {
+    showToast("Start or resume the signal session before generating a signal.");
+    return;
+  }
   if (!bot.owned) {
     if (!window.confirm(`Unlock ${bot.name} for ${formatMoney(bot.price)} from your wallet? This is a one-time purchase.`)) return;
     const { error: purchaseError } = await supabase.rpc("purchase_strategy", { p_strategy_id: bot.id });
@@ -1912,6 +2247,7 @@ async function runBot() {
       await Promise.all([loadStrategyCatalog(), refreshWalletSnapshot()]);
       render();
       showToast(`${bot.name} unlocked for ${formatMoney(bot.price)}.`);
+      if (state.activeView === "bots" && botSession.status !== "running") return;
     } catch (error) {
       showToast(`${bot.name} was unlocked, but account refresh failed: ${error.message}`);
       return;
@@ -1931,8 +2267,17 @@ async function runBot() {
   botSignal = {
     bot: bot.name,
     choice: data.signal,
-    strength: `${Number(data.strength)}%`,
+    strength: Number(data.strength),
   };
+  if (botSession.status === "running") {
+    botSession.signals.unshift({
+      bot: bot.name,
+      choice: data.signal,
+      strength: Number(data.strength),
+      time: Date.now(),
+    });
+    botSession.signals = botSession.signals.slice(0, 100);
+  }
   render();
 }
 
@@ -1959,6 +2304,20 @@ function startChart() {
         await refreshLiveMarketSnapshot();
       } catch (error) {
         showToast(`Live market update failed: ${error.message}`);
+      }
+    }
+    if (Date.now() - marketStatusLastAttemptAt >= 5000) {
+      const wasLoaded = marketStatusLoaded;
+      try {
+        const changed = await loadMarketStatus();
+        if (changed) render();
+      } catch (error) {
+        marketStatusLoaded = false;
+        marketStatusLastAttemptAt = Date.now();
+        if (wasLoaded) {
+          render();
+          showToast(`Market status unavailable; new positions are disabled: ${error.message}`);
+        }
       }
     }
     const walletRefreshInterval = state.mode === "live"
@@ -2000,21 +2359,182 @@ function tickTimestamp(tick) {
 function bindChartInteractions(canvas) {
   if (!canvas) return;
   chartPointer = null;
+  canvas.style.cursor = chartTool === "pan" ? "grab" : chartTool === "crosshair" ? "crosshair" : "copy";
   canvas.addEventListener("pointermove", (event) => {
     const rect = canvas.getBoundingClientRect();
     chartPointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (chartDrag && chartTool === "pan" && chartRenderState) {
+      const { plotWidth, visibleCandles, allCandles } = chartRenderState;
+      const dx = event.clientX - chartDrag.startX;
+      const shift = Math.round((dx / Math.max(1, plotWidth)) * visibleCandles.length);
+      chartOffset = clamp(chartDrag.startOffset + shift, 0, Math.max(0, allCandles.length - visibleCandles.length));
+    }
+    if (chartDrawingDraft) {
+      chartDrawingDraft.end = chartPointAt(chartPointer.x, chartPointer.y);
+    }
     drawChart(canvas);
   });
   canvas.addEventListener("pointerleave", () => {
-    chartPointer = null;
+    if (!chartDrag && !chartDrawingDraft) chartPointer = null;
     drawChart(canvas);
   });
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!chartRenderState) return;
+    const rect = canvas.getBoundingClientRect();
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (chartTool === "pan") {
+      chartDrag = { startX: event.clientX, startOffset: chartOffset };
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = "grabbing";
+    } else if (["measure", "trendline", "fibonacci"].includes(chartTool)) {
+      const start = chartPointAt(point.x, point.y);
+      if (start) {
+        chartDrawingDraft = { type: chartTool, start, end: start };
+        canvas.setPointerCapture(event.pointerId);
+      }
+    } else if (chartTool === "annotation") {
+      const anchor = chartPointAt(point.x, point.y);
+      if (!anchor) return;
+      const text = window.prompt("Annotation text (up to 60 characters):", "");
+      if (text?.trim()) {
+        chartDrawings.push({ type: "annotation", start: anchor, text: text.trim().slice(0, 60) });
+        drawChart(canvas);
+      }
+    }
+  });
+  canvas.addEventListener("pointerup", (event) => {
+    if (chartDrag) {
+      chartDrag = null;
+      canvas.style.cursor = chartTool === "pan" ? "grab" : "crosshair";
+    }
+    if (chartDrawingDraft) {
+      chartDrawingDraft.end = chartPointAt(
+        event.clientX - canvas.getBoundingClientRect().left,
+        event.clientY - canvas.getBoundingClientRect().top,
+      ) || chartDrawingDraft.end;
+      chartDrawings.push(chartDrawingDraft);
+      chartDrawingDraft = null;
+    }
+    drawChart(canvas);
+  });
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    chartZoom = clamp(chartZoom * (event.deltaY < 0 ? 1.2 : 1 / 1.2), 0.6, 8);
+    chartOffset = Math.min(chartOffset, Math.max(0, (chartRenderState?.allCandles.length || 0) - Math.floor(100 / chartZoom)));
+    drawChart(canvas);
+  }, { passive: false });
+}
+
+function chartPointAt(x, y) {
+  const view = chartRenderState;
+  if (!view || x < view.left || x > view.right || y < view.top || y > view.bottom) return null;
+  const index = clamp(Math.floor((x - view.left) / view.step), 0, view.visibleCandles.length - 1);
+  return {
+    time: view.visibleCandles[index].time,
+    price: view.max - ((y - view.top) / view.plotHeight) * view.range,
+  };
+}
+
+function handleChartAction(action) {
+  const canvas = app.querySelector("#price-chart");
+  if (!canvas) return;
+  if (action === "zoom-in" || action === "zoom-out") {
+    chartZoom = clamp(chartZoom * (action === "zoom-in" ? 1.25 : 0.8), 0.6, 8);
+  } else if (action === "reset") {
+    chartZoom = 1;
+    chartOffset = 0;
+  } else if (action === "clear-drawings") {
+    chartDrawings = [];
+    chartDrawingDraft = null;
+  } else if (action === "toggle-grid") {
+    chartSettings.showGrid = !chartSettings.showGrid;
+    app.querySelector('[data-chart-action="toggle-grid"]')?.classList.toggle("active", chartSettings.showGrid);
+  } else if (action === "toggle-price-line") {
+    chartSettings.showCurrentPrice = !chartSettings.showCurrentPrice;
+    app.querySelector('[data-chart-action="toggle-price-line"]')?.classList.toggle("active", chartSettings.showCurrentPrice);
+  } else if (action === "toggle-indicator-alert") {
+    chartIndicatorAlertEnabled = !chartIndicatorAlertEnabled;
+    chartIndicatorAlertKey = "";
+    app.querySelector('[data-chart-action="toggle-indicator-alert"]')?.classList.toggle("active", chartIndicatorAlertEnabled);
+    showToast(chartIndicatorAlertEnabled
+      ? "SMA 10 / EMA 20 crossover alerts are active while this page is open."
+      : "Indicator crossover alerts are off.");
+  } else if (action === "fullscreen") {
+    const chart = app.querySelector(".chart-panel");
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch((error) => showToast(`Could not exit fullscreen: ${error.message}`));
+    } else if (chart?.requestFullscreen) {
+      chart.requestFullscreen().catch((error) => showToast(`Could not enter fullscreen: ${error.message}`));
+    } else {
+      showToast("Fullscreen is not supported by this browser.");
+    }
+  } else if (action === "snapshot") {
+    try {
+      const link = document.createElement("a");
+      link.download = `pipmaster-${chartTimeframe}-${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (error) {
+      showToast(`Could not export chart snapshot: ${error.message}`);
+    }
+  } else if (action === "price-alert") {
+    const currentPrice = state.mode === "live" ? livePrice : price;
+    const rawTarget = window.prompt(`Alert when price reaches (current: ${currentPrice.toFixed(2)}):`, currentPrice.toFixed(2));
+    if (rawTarget === null) return;
+    const target = Number(rawTarget);
+    if (!Number.isFinite(target) || target <= 0) {
+      showToast("Enter a valid price above zero.");
+      return;
+    }
+    chartPriceAlert = { target, mode: state.mode };
+    showToast(`Price alert set at ${target.toFixed(2)} for ${state.mode} mode. Keep this page open.`);
+  }
+  drawChart(canvas);
+}
+
+function checkChartPriceAlert(previousPrice, currentPrice) {
+  checkChartIndicatorAlert();
+  if (!chartPriceAlert || chartPriceAlert.mode !== state.mode) return;
+  const reached = (previousPrice <= chartPriceAlert.target && currentPrice >= chartPriceAlert.target)
+    || (previousPrice >= chartPriceAlert.target && currentPrice <= chartPriceAlert.target);
+  if (reached) {
+    chartPriceAlert = null;
+    showToast("Your PIPMASTER price alert was reached.");
+  }
+}
+
+function checkChartIndicatorAlert() {
+  if (!chartIndicatorAlertEnabled) return;
+  const points = state.mode === "live" ? liveChartPoints : chartPoints;
+  const candles = chartCandles(points);
+  if (candles.length < 21) return;
+  const closes = candles.map((candle) => candle.close);
+  const ema = [closes[0]];
+  const multiplier = 2 / 21;
+  for (let index = 1; index < closes.length; index++) {
+    ema[index] = closes[index] * multiplier + ema[index - 1] * (1 - multiplier);
+  }
+  const last = closes.length - 1;
+  const previousSma = closes.slice(last - 10, last).reduce((sum, value) => sum + value, 0) / 10;
+  const currentSma = closes.slice(last - 9).reduce((sum, value) => sum + value, 0) / 10;
+  const previousRelation = previousSma - ema[last - 1];
+  const currentRelation = currentSma - ema[last];
+  const crossedUp = previousRelation <= 0 && currentRelation > 0;
+  const crossedDown = previousRelation >= 0 && currentRelation < 0;
+  const key = `${state.mode}:${candles[last].time}:${crossedUp ? "up" : "down"}`;
+  if ((crossedUp || crossedDown) && key !== chartIndicatorAlertKey) {
+    chartIndicatorAlertKey = key;
+    showToast(`SMA 10 crossed ${crossedUp ? "above" : "below"} EMA 20 on ${state.mode} chart.`);
+  }
 }
 
 function chartCandles(points) {
-  const intervals = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
-  const fallbackGroupSizes = { "1m": 5, "5m": 10, "15m": 15, "1h": 30 };
-  const interval = intervals[chartTimeframe] || intervals["1m"];
+  const intervals = { "5s": 5_000, "15s": 15_000, "30s": 30_000, "1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
+  const fallbackGroupSizes = { "5s": 5, "15s": 15, "30s": 30, "1m": 60, "5m": 300, "15m": 900, "1h": 3600 };
+  const tickPoints = points.map((point, index) => ({
+    ...point,
+    time: Number.isFinite(point.time) ? point.time : Date.now() - (points.length - index - 1) * 1000,
+  }));
   const candleFromPoints = (items, time) => ({
     time,
     open: items[0].y,
@@ -2022,26 +2542,26 @@ function chartCandles(points) {
     low: Math.min(...items.map((point) => point.y)),
     close: items[items.length - 1].y,
   });
-  const hasTimestamps = points.some((point) => Number.isFinite(point.time));
-
+  if (chartTimeframe === "tick") {
+    return tickPoints.map((point) => candleFromPoints([point], point.time));
+  }
+  const interval = intervals[chartTimeframe] || intervals["1m"];
+  const hasTimestamps = points.every((point) => Number.isFinite(point.time));
   if (!hasTimestamps) {
     const groupSize = fallbackGroupSizes[chartTimeframe] || fallbackGroupSizes["1m"];
     const groups = [];
-    for (let index = 0; index < points.length; index += groupSize) {
-      groups.push(points.slice(index, index + groupSize));
+    for (let index = 0; index < tickPoints.length; index += groupSize) {
+      groups.push(tickPoints.slice(index, index + groupSize));
     }
-    const now = Date.now();
     return groups.map((group, index) => candleFromPoints(
       group,
-      now - (groups.length - index - 1) * interval,
+      group[0].time,
     ));
   }
 
   const groups = new Map();
-  points.forEach((point, index) => {
-    const time = Number.isFinite(point.time)
-      ? point.time
-      : Date.now() - (points.length - index - 1) * 1000;
+  tickPoints.forEach((point) => {
+    const time = point.time;
     const bucket = Math.floor(time / interval) * interval;
     const group = groups.get(bucket) || [];
     group.push(point);
@@ -2050,6 +2570,55 @@ function chartCandles(points) {
   return [...groups.entries()]
     .sort(([first], [second]) => first - second)
     .map(([time, group]) => candleFromPoints(group, time));
+}
+
+function relativeStrengthIndex(closes, period = 14) {
+  const values = Array(closes.length).fill(null);
+  if (closes.length <= period) return values;
+  let averageGain = 0;
+  let averageLoss = 0;
+  for (let index = 1; index <= period; index++) {
+    const change = closes[index] - closes[index - 1];
+    averageGain += Math.max(change, 0) / period;
+    averageLoss += Math.max(-change, 0) / period;
+  }
+  const rsiAt = (gain, loss) => loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+  values[period] = rsiAt(averageGain, averageLoss);
+  for (let index = period + 1; index < closes.length; index++) {
+    const change = closes[index] - closes[index - 1];
+    averageGain = (averageGain * (period - 1) + Math.max(change, 0)) / period;
+    averageLoss = (averageLoss * (period - 1) + Math.max(-change, 0)) / period;
+    values[index] = rsiAt(averageGain, averageLoss);
+  }
+  return values;
+}
+
+function findRsiDivergences(candles, rsiValues) {
+  const lowPivots = [];
+  const highPivots = [];
+  for (let index = 15; index < candles.length - 1; index++) {
+    const previous = candles[index - 1];
+    const current = candles[index];
+    const next = candles[index + 1];
+    if (Number.isFinite(rsiValues[index])
+      && current.low < previous.low && current.low <= next.low) lowPivots.push(index);
+    if (Number.isFinite(rsiValues[index])
+      && current.high > previous.high && current.high >= next.high) highPivots.push(index);
+  }
+  const signals = [];
+  if (lowPivots.length >= 2) {
+    const [previous, current] = lowPivots.slice(-2);
+    if (candles[current].low < candles[previous].low && rsiValues[current] > rsiValues[previous]) {
+      signals.push({ index: current, price: candles[current].low, label: "Bullish divergence" });
+    }
+  }
+  if (highPivots.length >= 2) {
+    const [previous, current] = highPivots.slice(-2);
+    if (candles[current].high > candles[previous].high && rsiValues[current] < rsiValues[previous]) {
+      signals.push({ index: current, price: candles[current].high, label: "Bearish divergence" });
+    }
+  }
+  return signals;
 }
 
 function drawChart(canvas) {
@@ -2071,11 +2640,16 @@ function drawChart(canvas) {
   if (!candles.length) {
     candles.push({ time: Date.now(), open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice });
   }
-  const visibleCandles = candles.slice(-100);
+  const visibleCount = clamp(Math.floor(100 / chartZoom), 10, 160);
+  const maxOffset = Math.max(0, candles.length - visibleCount);
+  chartOffset = clamp(chartOffset, 0, maxOffset);
+  const end = candles.length - chartOffset;
+  const visibleCandles = candles.slice(Math.max(0, end - visibleCount), end);
   const left = 12;
   const right = width - 68;
   const top = 14;
-  const bottom = height - 28;
+  const rsiHeight = chartIndicators.rsi ? Math.min(64, height * 0.24) : 0;
+  const bottom = height - 28 - rsiHeight;
   const plotWidth = right - left;
   const plotHeight = bottom - top;
   const values = visibleCandles.flatMap((candle) => [candle.high, candle.low]);
@@ -2088,7 +2662,8 @@ function drawChart(canvas) {
   const range = max - min;
   const yForPrice = (value) => bottom - ((value - min) / range) * plotHeight;
   const step = plotWidth / visibleCandles.length;
-  const candleWidth = Math.min(13, Math.max(3, step * 0.64));
+  const candleWidth = Math.min(12, Math.max(3, step * 0.82));
+  chartRenderState = { left, right, top, bottom, plotWidth, plotHeight, visibleCandles, allCandles: candles, step, range, min, max };
 
   ctx.fillStyle = "#0e151f";
   ctx.fillRect(0, 0, width, height);
@@ -2097,12 +2672,14 @@ function drawChart(canvas) {
   for (let index = 0; index <= 5; index++) {
     const y = top + (plotHeight * index) / 5;
     const value = max - (range * index) / 5;
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(right, y);
-    ctx.strokeStyle = "rgba(151,168,190,.13)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    if (chartSettings.showGrid) {
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+      ctx.strokeStyle = "rgba(151,168,190,.13)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
     ctx.fillStyle = "#8b98a9";
     ctx.textAlign = "right";
     ctx.fillText(value.toFixed(2), width - 8, y);
@@ -2110,52 +2687,235 @@ function drawChart(canvas) {
 
   for (let index = 0; index <= 6; index++) {
     const x = left + (plotWidth * index) / 6;
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.strokeStyle = "rgba(151,168,190,.09)";
-    ctx.stroke();
+    if (chartSettings.showGrid) {
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+      ctx.strokeStyle = "rgba(151,168,190,.09)";
+      ctx.stroke();
+    }
     if (index <= 6) {
       const candleIndex = Math.min(visibleCandles.length - 1, Math.round((visibleCandles.length - 1) * index / 6));
       const date = new Date(visibleCandles[candleIndex].time);
       ctx.fillStyle = "#8b98a9";
       ctx.textAlign = index === 0 ? "left" : index === 6 ? "right" : "center";
-      ctx.fillText(date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), x, height - 13);
+      ctx.fillText(date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: chartTimeframe === "tick" || chartTimeframe.endsWith("s") }), x, height - 13);
     }
   }
 
-  visibleCandles.forEach((candle, index) => {
-    const x = left + step * index + step / 2;
-    const color = candle.close >= candle.open ? "#26a69a" : "#ef5350";
-    const openY = yForPrice(candle.open);
-    const closeY = yForPrice(candle.close);
-    const bodyTop = Math.min(openY, closeY);
-    const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+  if (chartDisplay === "line") {
     ctx.beginPath();
-    ctx.moveTo(x, yForPrice(candle.high));
-    ctx.lineTo(x, yForPrice(candle.low));
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
+    visibleCandles.forEach((candle, index) => {
+      const x = left + step * index + step / 2;
+      if (index === 0) ctx.moveTo(x, yForPrice(candle.close));
+      else ctx.lineTo(x, yForPrice(candle.close));
+    });
+    ctx.strokeStyle = isLive ? "#52a1ff" : "#41d5a4";
+    ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
-  });
+    const lastX = left + step * (visibleCandles.length - 0.5);
+    ctx.lineTo(lastX, bottom);
+    ctx.lineTo(left + step / 2, bottom);
+    ctx.closePath();
+    ctx.fillStyle = isLive ? "rgba(82,161,255,.09)" : "rgba(65,213,164,.09)";
+    ctx.fill();
+  } else {
+    visibleCandles.forEach((candle, index) => {
+      const x = left + step * index + step / 2;
+      const color = candle.close >= candle.open ? "#26a69a" : "#ef5350";
+      const openY = yForPrice(candle.open);
+      const closeY = yForPrice(candle.close);
+      const bodyTop = Math.min(openY, closeY);
+      const bodyHeight = Math.max(1, Math.abs(closeY - openY));
+      ctx.beginPath();
+      ctx.moveTo(x, yForPrice(candle.high));
+      ctx.lineTo(x, yForPrice(candle.low));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
+    });
+  }
+
+  const fullCloses = candles.map((candle) => candle.close);
+  const startIndex = Math.max(0, end - visibleCount);
+  const drawIndicator = (type, enabled, period, color) => {
+    if (!enabled || fullCloses.length < period) return;
+    const indicator = [];
+    if (type === "sma") {
+      for (let index = 0; index < fullCloses.length; index++) {
+        indicator[index] = index + 1 < period
+          ? null
+          : fullCloses.slice(index + 1 - period, index + 1).reduce((sum, value) => sum + value, 0) / period;
+      }
+    } else {
+      const multiplier = 2 / (period + 1);
+      let previous = fullCloses[0];
+      indicator[0] = previous;
+      for (let index = 1; index < fullCloses.length; index++) {
+        previous = fullCloses[index] * multiplier + previous * (1 - multiplier);
+        indicator[index] = previous;
+      }
+    }
+    ctx.beginPath();
+    let started = false;
+    visibleCandles.forEach((candle, index) => {
+      const value = indicator[startIndex + index];
+      if (!Number.isFinite(value)) return;
+      const x = left + step * index + step / 2;
+      if (!started) {
+        ctx.moveTo(x, yForPrice(value));
+        started = true;
+      } else {
+        ctx.lineTo(x, yForPrice(value));
+      }
+    });
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  };
+  drawIndicator("sma", chartIndicators.sma, 10, "#e8b44a");
+  drawIndicator("ema", chartIndicators.ema, 20, "#b395ff");
+
+  const rsiValues = relativeStrengthIndex(fullCloses);
+  if (chartIndicators.rsi && rsiHeight > 30) {
+    const rsiTop = bottom + 7;
+    const rsiBottom = height - 29;
+    [30, 50, 70].forEach((value) => {
+      const y = rsiBottom - (value / 100) * (rsiBottom - rsiTop);
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+      ctx.strokeStyle = value === 50 ? "rgba(151,168,190,.1)" : "rgba(151,168,190,.18)";
+      ctx.setLineDash(value === 50 ? [] : [3, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    ctx.beginPath();
+    let started = false;
+    visibleCandles.forEach((candle, index) => {
+      const value = rsiValues[startIndex + index];
+      if (!Number.isFinite(value)) return;
+      const x = left + step * index + step / 2;
+      const y = rsiBottom - (value / 100) * (rsiBottom - rsiTop);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+    ctx.strokeStyle = "#b395ff";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.fillStyle = "#a9b5c5";
+    ctx.font = "8px DM Sans, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("RSI 14", left + 2, rsiTop + 4);
+    ctx.textAlign = "right";
+    ctx.fillText("70", right - 2, rsiBottom - .7 * (rsiBottom - rsiTop));
+    ctx.fillText("30", right - 2, rsiBottom - .3 * (rsiBottom - rsiTop));
+  }
+
+  const xForTime = (time) => {
+    if (!visibleCandles.length
+      || time < visibleCandles[0].time
+      || time > visibleCandles[visibleCandles.length - 1].time) return null;
+    let closestIndex = 0;
+    let closestDistance = Infinity;
+    visibleCandles.forEach((candle, index) => {
+      const distance = Math.abs(candle.time - time);
+      if (distance < closestDistance) {
+        closestIndex = index;
+        closestDistance = distance;
+      }
+    });
+    return left + step * closestIndex + step / 2;
+  };
+  if (chartIndicators.divergence) {
+    findRsiDivergences(candles, rsiValues).forEach((signal) => {
+      const candle = candles[signal.index];
+      const x = xForTime(candle.time);
+      if (x === null) return;
+      const y = yForPrice(signal.price);
+      const bullish = signal.label.startsWith("Bullish");
+      ctx.fillStyle = bullish ? "#41d5a4" : "#ff657c";
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = "9px DM Sans, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(signal.label, x + 7, y + (bullish ? 11 : -9));
+    });
+  }
+  const drawDrawing = (drawing) => {
+    const startX = xForTime(drawing.start.time);
+    if (startX === null) return;
+    const startY = yForPrice(drawing.start.price);
+    if (drawing.type === "annotation") {
+      ctx.fillStyle = "#f3c65e";
+      ctx.beginPath();
+      ctx.arc(startX, startY, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = "10px DM Sans, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(drawing.text, startX + 6, startY - 8);
+      return;
+    }
+    if (!drawing.end) return;
+    const endX = xForTime(drawing.end.time);
+    if (endX === null) return;
+    const endY = yForPrice(drawing.end.price);
+    ctx.strokeStyle = drawing.type === "measure" ? "#f3c65e" : "#82aaff";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.5;
+    if (drawing.type === "fibonacci") {
+      const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+      levels.forEach((level) => {
+        const y = startY + (endY - startY) * level;
+        ctx.beginPath();
+        ctx.moveTo(Math.min(startX, endX), y);
+        ctx.lineTo(Math.max(startX, endX), y);
+        ctx.stroke();
+        ctx.font = "8px DM Sans, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(`${(level * 100).toFixed(1)}%`, Math.min(startX, endX) + 2, y - 4);
+      });
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      if (drawing.type === "measure") {
+        const difference = drawing.end.price - drawing.start.price;
+        const percent = drawing.start.price ? difference / drawing.start.price * 100 : 0;
+        ctx.font = "9px DM Sans, sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(`${difference >= 0 ? "+" : ""}${difference.toFixed(2)} (${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%)`, endX + 5, endY - 7);
+      }
+    }
+  };
+  chartDrawings.forEach(drawDrawing);
+  if (chartDrawingDraft) drawDrawing(chartDrawingDraft);
 
   const latest = visibleCandles[visibleCandles.length - 1];
   const currentY = yForPrice(currentPrice);
-  ctx.save();
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(left, currentY);
-  ctx.lineTo(right, currentY);
-  ctx.strokeStyle = isLive ? "rgba(82,161,255,.75)" : "rgba(65,213,164,.75)";
-  ctx.stroke();
-  ctx.restore();
-  ctx.fillStyle = isLive ? "#3886d8" : "#239b78";
-  ctx.fillRect(right + 1, currentY - 9, width - right - 1, 18);
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  ctx.fillText(currentPrice.toFixed(2), right + (width - right) / 2, currentY);
+  if (chartSettings.showCurrentPrice) {
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(left, currentY);
+    ctx.lineTo(right, currentY);
+    ctx.strokeStyle = isLive ? "rgba(82,161,255,.75)" : "rgba(65,213,164,.75)";
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = isLive ? "#3886d8" : "#239b78";
+    ctx.fillRect(right + 1, currentY - 9, width - right - 1, 18);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.fillText(currentPrice.toFixed(2), right + (width - right) / 2, currentY);
+  }
 
   ctx.strokeStyle = "rgba(151,168,190,.2)";
   ctx.beginPath();
@@ -2226,6 +2986,9 @@ function drawChart(canvas) {
 window.addEventListener("resize", () => {
   const canvas = document.querySelector("#price-chart");
   if (canvas) drawChart(canvas);
+});
+document.addEventListener("fullscreenchange", () => {
+  window.setTimeout(() => drawChart(document.querySelector("#price-chart")), 50);
 });
 
 beginAuth();
