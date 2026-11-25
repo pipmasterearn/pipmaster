@@ -34,7 +34,6 @@ const auth = {
   user: null,
   profile: null,
   profileError: "",
-  adminConfigured: null,
   screen: "login",
   message: "",
   messageType: "info",
@@ -43,16 +42,6 @@ const auth = {
 
 const state = { ...initialState };
 const app = document.querySelector("#app");
-
-app?.addEventListener("click", (event) => {
-  const setupButton = event.target.closest('[data-action="admin-create"]');
-  if (!setupButton) return;
-  auth.screen = "admin-create";
-  auth.message = "";
-  auth.messageType = "info";
-  window.location.hash = "#/admin/setup";
-  render();
-});
 
 const formatMoney = (value) => `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const formatKes = (value, rate = 128) => `KSh ${(Number(value) * Number(rate)).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -109,7 +98,7 @@ function escapeHtml(text) {
 }
 
 function render() {
-  if (!auth.ready || !auth.user || auth.screen === "admin-login" || auth.screen === "admin-create" || auth.screen === "admin-denied" || auth.screen === "funds-terms") {
+  if (!auth.ready || !auth.user || auth.screen === "admin-login" || auth.screen === "admin-denied" || auth.screen === "funds-terms") {
     renderAuth();
     return;
   }
@@ -213,32 +202,21 @@ function renderAuth() {
   const reset = auth.screen === "reset-password";
   const signup = auth.screen === "signup";
   const login = auth.screen === "login" || adminLogin;
-  const adminCreate = auth.screen === "admin-create";
   const configMissing = !supabaseConfigured;
-  const title = loading ? "Checking your session" : denied ? "Admin access required" : reset ? "Choose a new password" : recovery ? "Reset your password" : signup ? "Create your account" : adminCreate ? "Create administrator" : adminLogin ? "Admin sign in" : "Welcome back";
+  const title = loading ? "Checking your session" : denied ? "Admin access required" : reset ? "Choose a new password" : recovery ? "Reset your password" : signup ? "Create your account" : adminLogin ? "Admin sign in" : "Welcome back";
   const subtitle = loading ? "Please wait a moment." : denied
     ? "This account does not have administrator access."
     : reset ? "Use a strong password you have not used elsewhere."
       : recovery ? "We’ll email you a secure password-reset link."
         : signup ? "Create your PIPMASTER account to continue."
-          : adminCreate ? "One-time setup for the PIPMASTER administrator account."
-            : adminLogin ? "Sign in with the pre-provisioned administrator account."
-              : "Sign in to your account to continue.";
+          : adminLogin ? "Sign in with the pre-provisioned administrator account."
+            : "Sign in to your account to continue.";
 
   let form = "";
   if (configMissing) {
     form = `<div class="auth-alert error"><strong>Supabase setup is required</strong><p>Authentication and remote app data are intentionally fail-closed. Configure the GitHub Actions variables <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>, then apply all Supabase migrations before sign-up can work.</p></div>`;
   } else if (denied) {
     form = `<div class="auth-alert error"><strong>This account is not an administrator.</strong><p>Admin access is granted from the protected database, not by choosing an email address on this screen.</p></div><div class="auth-actions"><button class="auth-primary" data-action="admin-retry">Try admin sign in</button><button class="auth-link" data-action="leave-admin">Return to trading</button></div>`;
-  } else if (adminCreate) {
-    form = `<form class="auth-form" data-form="admin-create">
-      <label>Full name<input name="full_name" autocomplete="name" value="PIPMASTER Admin" required maxlength="80"></label>
-      <label>Username<input name="username" autocomplete="username" value="pipmaster" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" title="Use 3–24 letters, numbers, or underscores"></label>
-      <label>Email address<input name="email" type="email" autocomplete="username" value="pipmasterearn@gmail.com" required></label>
-      <label>Password<input name="password" type="password" autocomplete="new-password" placeholder="Enter the administrator password" required minlength="10"></label>
-      <label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" placeholder="Enter the password again" required minlength="10"></label>
-      <button class="auth-primary" type="submit" ${auth.busy ? "disabled" : ""}>${auth.busy ? "Creating administrator…" : "Create administrator account"}</button>
-    </form>`;
   } else if (login) {
     form = `    <form class="auth-form" data-form="login">
       <label>Email address<input name="email" type="email" autocomplete="${adminLogin ? "username" : "email"}" placeholder="you@example.com" required></label>
@@ -275,7 +253,7 @@ function renderAuth() {
     ${auth.message ? `<div class="auth-alert ${auth.messageType}">${escapeHtml(auth.message)}</div>` : ""}
     ${auth.profileError ? `<div class="auth-alert error">${escapeHtml(auth.profileError)}</div>` : ""}
     ${form}
-    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : adminCreate ? `One-time setup · <button class="auth-link" data-action="leave-admin">Back to sign in</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>${auth.adminConfigured === false && !auth.user ? `<button class="auth-setup-button" type="button" data-action="admin-create">Create one-time admin account</button>` : ""}` : ""}</div>` : adminCreate ? `<div class="auth-switch">Administrator setup · <button class="auth-link" type="button" data-action="leave-admin">Back to sign in</button></div>` : ""}
+    ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>` : ""}</div>` : ""}
     <button class="auth-link centered funds-terms-link" data-action="show-funds-terms">Wallet funds terms</button>
     <div class="auth-security"><span>⌑</span> Passwords are handled by Supabase Auth and are never stored in this site’s source code.</div>
   </section></main>`;
@@ -433,11 +411,11 @@ async function initializeWorkspace(user) {
         refreshTerminalSnapshot(),
         refreshWalletSnapshot(),
       ]);
-      if (window.location.hash === "#/admin/setup") {
-        await checkAdminConfigured();
-        auth.screen = auth.profile?.role === "admin" || auth.adminConfigured === true
-          ? "admin-login"
-          : "admin-create";
+      if (window.location.hash === "#/admin/setup" && auth.profile?.role === "admin") {
+        state.activeView = "admin";
+        auth.screen = "workspace";
+      } else if (window.location.hash === "#/admin/setup") {
+        auth.screen = "admin-denied";
       } else {
         auth.screen = window.location.hash.includes("type=recovery") ? "reset-password" : "workspace";
       }
@@ -478,16 +456,6 @@ async function loadStrategyCatalog() {
   }
 }
 
-async function checkAdminConfigured() {
-  if (!supabase) return;
-  try {
-    const { data, error } = await supabase.rpc("is_admin_configured");
-    if (!error) auth.adminConfigured = Boolean(data);
-  } catch {
-    auth.adminConfigured = null;
-  }
-}
-
 async function beginAuth() {
   const recoveringPassword = window.location.hash.includes("type=recovery");
   auth.screen = recoveringPassword
@@ -495,7 +463,7 @@ async function beginAuth() {
     : window.location.hash === "#/signup"
       ? "signup"
       : window.location.hash === "#/admin/setup"
-        ? "admin-create"
+        ? "admin-login"
         : "login";
   render();
   if (!supabaseConfigured) {
@@ -509,9 +477,6 @@ async function beginAuth() {
     auth.user = data.session?.user || null;
     if (auth.user) {
       await initializeWorkspace(auth.user);
-    } else if (auth.screen === "admin-create") {
-      await checkAdminConfigured();
-      if (auth.adminConfigured === true) auth.screen = "admin-login";
     }
   } catch (error) {
     auth.message = `Could not restore your sign-in session: ${error.message}`;
@@ -578,7 +543,7 @@ function bindAuthEvents() {
       render();
       return;
     }
-    auth.screen = auth.adminConfigured === false ? "admin-create" : "admin-login";
+    auth.screen = "admin-login";
     render();
   }));
   app.querySelectorAll('[data-action="leave-admin"]').forEach((button) => button.addEventListener("click", () => {
@@ -638,42 +603,7 @@ async function handleAuthSubmit(event) {
   auth.message = "";
   render();
   try {
-    if (formType === "admin-create") {
-      if (values.password !== values.confirm_password) throw new Error("The passwords do not match.");
-      if (!/^[A-Za-z0-9_]{3,24}$/.test(values.username)) throw new Error("Username must be 3–24 letters, numbers, or underscores.");
-      if (String(values.email).trim().toLowerCase() !== "pipmasterearn@gmail.com") throw new Error("Use the authorized administrator email address.");
-      await checkAdminConfigured();
-      if (auth.adminConfigured) throw new Error("An administrator account already exists.");
-
-      const { data, error } = await supabase.auth.signUp({
-        email: String(values.email).trim(),
-        password: String(values.password),
-        options: {
-          emailRedirectTo: getRedirectUrl(),
-          data: { full_name: String(values.full_name).trim(), username: String(values.username).trim() },
-        },
-      });
-      if (error) throw error;
-
-      if (data.session) {
-        auth.user = data.user;
-        await initializeWorkspace(data.user);
-        const { error: bootstrapError } = await supabase.rpc("bootstrap_first_admin", {
-          p_email: "pipmasterearn@gmail.com",
-        });
-        if (bootstrapError) throw bootstrapError;
-        await loadProfile(data.user);
-        await checkAdminConfigured();
-        auth.screen = "workspace";
-        state.activeView = "admin";
-        auth.message = "Administrator account created.";
-        auth.messageType = "success";
-      } else {
-        auth.screen = "admin-login";
-        auth.message = "Administrator account created. Confirm the email if prompted, then sign in.";
-        auth.messageType = "success";
-      }
-    } else if (formType === "signup") {
+    if (formType === "signup") {
       if (values.password !== values.confirm_password) throw new Error("The passwords do not match.");
       if (!/^[A-Za-z0-9_]{3,24}$/.test(values.username)) throw new Error("Username must be 3–24 letters, numbers, or underscores.");
       const { data, error } = await supabase.auth.signUp({
@@ -704,15 +634,6 @@ async function handleAuthSubmit(event) {
       auth.user = data.user;
       await initializeWorkspace(data.user);
       if (adminAttempt) {
-        await checkAdminConfigured();
-        if (auth.adminConfigured === false && String(data.user.email || "").toLowerCase() === "pipmasterearn@gmail.com") {
-          const { error: bootstrapError } = await supabase.rpc("bootstrap_first_admin", {
-            p_email: "pipmasterearn@gmail.com",
-          });
-          if (bootstrapError) throw bootstrapError;
-          await loadProfile(data.user);
-          await checkAdminConfigured();
-        }
         if (auth.profile?.role !== "admin") {
           auth.screen = "admin-denied";
           auth.message = "This account does not have admin access.";
