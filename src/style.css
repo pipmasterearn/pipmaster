@@ -121,7 +121,7 @@ button { cursor: pointer; }
 .auth-link { padding: 0; border: 0; background: transparent; color: var(--yellow); font-size: 9px; }.auth-link:hover { text-decoration: underline; }.auth-link.centered { justify-self: center; padding: 5px; }
 .auth-switch { margin-top: 17px; color: #8390a1; text-align: center; font-size: 9px; }.auth-switch .auth-link { margin-left: 4px; }
 .auth-alert { margin: 0 0 14px; padding: 10px 11px; border: 1px solid rgba(65,213,164,.18); border-radius: 6px; background: rgba(65,213,164,.055); color: #a9e8d2; font-size: 9px; line-height: 1.5; }.auth-alert.error { border-color: rgba(255,101,124,.2); background: rgba(255,101,124,.06); color: #ffc0ca; }.auth-alert p { margin: 5px 0 0; color: inherit; opacity: .86; }.auth-alert code { color: #ffe198; font-size: 8px; }
-.auth-actions { display: grid; justify-items: center; gap: 13px; }.auth-security { display: flex; justify-content: center; gap: 6px; margin-top: 21px; padding-top: 14px; border-top: 1px solid var(--border); color: #748193; text-align: center; font-size: 8px; line-height: 1.5; }.auth-security span { color: var(--green); }
+.auth-actions { display: grid; justify-items: center; gap: 13px; }
 .avatar-image { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.avatar-upload { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 5px; background: #17212d; color: #c3ccd7; cursor: pointer; font-size: 8px; }.avatar-upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .profile-panel { max-width: 900px; margin: 0 auto; }.profile-cover { display: flex; align-items: center; gap: 13px; padding: 21px; border-bottom: 1px solid var(--border); background: linear-gradient(105deg, rgba(243,198,94,.07), transparent 70%); }.profile-avatar { display: grid; width: 56px; height: 56px; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid rgba(243,198,94,.3); border-radius: 50%; background: #292832; color: var(--yellow); font-size: 17px; font-weight: 700; }.profile-cover > div:nth-child(2) { display: grid; gap: 4px; min-width: 0; }.profile-cover strong { overflow: hidden; color: #e9edf4; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.profile-cover small { overflow: hidden; color: #8390a1; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }.profile-cover .eyebrow { color: #b6a05d; font-size: 7px; }.profile-cover .avatar-upload { margin-left: auto; }
 .profile-form { padding: 20px; }.profile-form-heading h2, .security-section h2 { margin: 0; color: #e1e7ef; font-size: 11px; }.profile-form-heading p, .security-section p { margin: 4px 0 0; color: #7c899b; font-size: 9px; }.profile-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 17px; }.profile-fields small { color: #667487; font-size: 8px; font-weight: 400; }.profile-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 17px; }.profile-message { color: #8e9aac; font-size: 9px; }.profile-message.success { color: var(--green); }.profile-message.error { color: var(--red); }
@@ -354,7 +354,7 @@ body { font-size: 16px; }
 .app-shell label, .auth-form > label, .profile-fields > label { font-size: 14px !important; }
 .app-shell td { font-size: 14px !important; }
 .app-shell .toast { font-size: 14px !important; }
-.auth-screen .auth-form > label, .auth-screen .auth-options, .auth-screen .remember-option, .auth-screen .auth-switch, .auth-screen .auth-link, .auth-screen .auth-primary, .auth-screen .auth-alert, .auth-screen .auth-security { font-size: 14px !important; }
+.auth-screen .auth-form > label, .auth-screen .auth-options, .auth-screen .remember-option, .auth-screen .auth-switch, .auth-screen .auth-link, .auth-screen .auth-primary, .auth-screen .auth-alert { font-size: 14px !important; }
 .auth-screen .auth-heading p { font-size: 15px !important; }
 
 @media (max-width: 540px) {
@@ -377,8 +377,7 @@ body { font-size: 16px; }
 .password-toggle { font-size: 12px; }
 .auth-options, .remember-option, .auth-switch, .auth-link { font-size: 12px; }
 .auth-primary { min-height: 46px; font-size: 14px; }
-.auth-alert, .auth-security { font-size: 12px; }
-.auth-security { line-height: 1.55; }
+.auth-alert { font-size: 12px; }
 .auth-switch { margin-top: 20px; }
 .auth-setup-button { display: block; width: 100%; min-height: 44px; margin-top: 12px; border: 1px solid rgba(243,198,94,.28); border-radius: 7px; background: rgba(243,198,94,.08); color: var(--yellow); font-size: 12px; font-weight: 700; }
 
@@ -416,7 +415,6 @@ body { font-size: 16px; }
   .auth-form input { height: 48px; font-size: 16px; }
   .auth-primary { min-height: 48px; font-size: 15px; }
   .auth-options, .remember-option, .auth-switch, .auth-link { font-size: 11px; }
-  .auth-security { margin-top: 16px; font-size: 10px; }
   .auth-alert { font-size: 11px; }
 
   .content { padding: 16px 12px 14px; }

@@ -274,7 +274,6 @@ function renderAuth() {
     ${form}
     ${!configMissing && !denied ? `<div class="auth-switch">${signup ? `Already have an account? <button class="auth-link" data-screen="login">Sign in</button>` : login && !adminLogin ? `New to PIPMASTER? <button class="auth-link" data-screen="signup">Create account</button>` : adminLogin ? `Administrator access only · <button class="auth-link" data-action="leave-admin">Back</button>` : ""}</div>` : ""}
     <button class="auth-link centered funds-terms-link" data-action="show-funds-terms">Wallet funds terms</button>
-    <div class="auth-security"><span>⌑</span> Passwords are handled by Supabase Auth and are never stored in this site’s source code.</div>
   </section></main>`;
   bindAuthEvents();
 }
@@ -2699,7 +2698,11 @@ function drawChart(canvas) {
       const date = new Date(visibleCandles[candleIndex].time);
       ctx.fillStyle = "#8b98a9";
       ctx.textAlign = index === 0 ? "left" : index === 6 ? "right" : "center";
-      ctx.fillText(date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: chartTimeframe === "tick" || chartTimeframe.endsWith("s") }), x, height - 13);
+      ctx.fillText(date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        ...((chartTimeframe === "tick" || chartTimeframe.endsWith("s")) ? { second: "2-digit" } : {}),
+      }), x, height - 13);
     }
   }
 
